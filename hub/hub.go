@@ -4,7 +4,6 @@ import (
 	"code.google.com/p/go.net/websocket"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -66,36 +65,28 @@ func (self *Server) removeSession(id string) {
 	delete(self.sessions, id)
 }
 
-func (self *Server) getSession(id string) (result *Session, err error) {
+func (self *Server) getSession(id string) (result *Session) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
 	if id == "" {
+		id = self.randomId()
+	}
+	if result = self.sessions[id]; result == nil {
 		result = &Session{
 			output: make(chan Message, defaultOutputBuffer),
-			id:     self.randomId(),
+			id:     id,
 			server: self,
 		}
-		result.cleanupTimer = time.AfterFunc(self.sessionTimeout, result.remove)
+		result.cleanupTimer = &time.Timer{}
 		self.sessions[id] = result
-	} else {
-		result = self.sessions[id]
-		if result == nil {
-			err = fmt.Errorf("No session with id %v", id)
-		}
 	}
 	return
 }
 
 func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	self.logger.Printf("%v\t%v\t%v\t%v", time.Now(), r.Method, r.URL, r.RemoteAddr)
-	session, err := self.getSession(r.URL.Query().Get("session_id"))
-	if err != nil {
-		w.WriteHeader(417)
-		fmt.Fprintf(w, "%v", err)
-		return
-	}
-	websocket.Handler(session.Handle).ServeHTTP(w, r)
+	websocket.Handler(self.getSession(r.URL.Query().Get("session_id")).Handle).ServeHTTP(w, r)
 }
 
 type MessageType string
@@ -202,7 +193,7 @@ func (self *Session) remove() {
 }
 
 func (self *Session) Handle(ws *websocket.Conn) {
-	self.server.logger.Printf("%v\t%v\t%v\t%v\t[ws]", time.Now(), ws.Request().Method, ws.Request().URL, ws.Request().RemoteAddr)
+	self.server.logger.Printf("%v\t%v\t%v\t%v\t%v", time.Now(), ws.Request().Method, ws.Request().URL, ws.Request().RemoteAddr, self.id)
 
 	self.ws = ws
 	defer self.ws.Close()
