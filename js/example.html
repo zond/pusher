@@ -19,6 +19,8 @@
 
     pusher.on("/foo", function(type, text) {
       $("#r").prepend("<p><h2>" + type + "</h2>" + text +"</p>");
+    }, function(x) {
+      $("#r").prepend("<p><h2>Subscribed on</h2>" + x +"</p>");
     });
 
     $("#f").submit(function(event) {
