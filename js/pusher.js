@@ -52,8 +52,8 @@ function Pusher(options) {
 	 */
 	that.handleMessage = function(msg) {
 		if (msg.Type == "Welcome") {
-			that.heartbeat = msg.Data.Heartbeat;
-			that.id = msg.Data.Id;
+			that.heartbeat = msg.Welcome.Heartbeat;
+			that.id = msg.Welcome.Id;
 			if (that.heartbeater != null) {
 				clearInterval(that.heartbeater);
 			}

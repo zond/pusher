@@ -36,6 +36,8 @@ type Server struct {
 	heartbeat      time.Duration
 	sessionTimeout time.Duration
 	sessions       map[string]*Session
+	subscriptions  map[string]map[string]*Session
+	subscribers    map[string]map[string]bool
 	lock           *sync.RWMutex
 	outputBuffer   int
 	logger         *log.Logger
@@ -46,8 +48,54 @@ func NewServer() *Server {
 		heartbeat:      defaultHeartbeat,
 		sessionTimeout: defaultSessionTimeout,
 		sessions:       map[string]*Session{},
+		subscriptions:  map[string]map[string]*Session{},
+		subscribers:    map[string]map[string]bool{},
 		lock:           &sync.RWMutex{},
 		logger:         log.New(os.Stdout, "pusher: ", 0),
+	}
+}
+
+func (self *Server) addSubscription(session *Session, uri string) {
+	self.lock.Lock()
+	defer self.lock.Unlock()
+
+	if _, found := self.subscriptions[uri]; !found {
+		self.subscriptions[uri] = map[string]*Session{}
+	}
+	self.subscriptions[uri][session.id] = session
+
+	if _, found := self.subscribers[session.id]; !found {
+		self.subscribers[session.id] = map[string]bool{}
+	}
+	self.subscribers[session.id][uri] = true
+
+	self.logger.Printf("added subscriber:\n%v", prettify(self.subscriptions))
+}
+
+func (self *Server) Emit(message Message) {
+	self.lock.Lock()
+	defer self.lock.Unlock()
+
+	for _, session := range self.subscriptions[message.URI] {
+		self.logger.Printf("sending %+v to %v", message, session.id)
+		session.send(message)
+	}
+}
+
+func (self *Server) removeSubscription(id, uri string, withLocking bool) {
+	if withLocking {
+		self.lock.Lock()
+		defer self.lock.Unlock()
+	}
+
+	delete(self.subscriptions[uri], id)
+	if len(self.subscriptions[uri]) == 0 {
+		delete(self.subscriptions, uri)
+	}
+
+	delete(self.subscribers[id], uri)
+	if len(self.subscribers[id]) == 0 {
+		delete(self.subscribers, id)
 	}
 }
 
@@ -62,7 +110,15 @@ func (self *Server) randomId() string {
 func (self *Server) removeSession(id string) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
+
 	delete(self.sessions, id)
+
+	self.lock.Lock()
+	defer self.lock.Unlock()
+
+	for uri, _ := range self.subscribers[id] {
+		self.removeSubscription(id, uri, false)
+	}
 }
 
 func (self *Server) getSession(id string) (result *Session) {
@@ -92,9 +148,12 @@ func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type MessageType string
 
 const (
-	TypeError     = "Error"
-	TypeHeartbeat = "Heartbeat"
-	TypeWelcome   = "Welcome"
+	TypeError       = "Error"
+	TypeHeartbeat   = "Heartbeat"
+	TypeWelcome     = "Welcome"
+	TypeSubscribe   = "Subscribe"
+	TypeUnsubscribe = "Unsubscribe"
+	TypeMessage     = "Message"
 )
 
 type Welcome struct {
@@ -104,8 +163,11 @@ type Welcome struct {
 }
 
 type Message struct {
-	Type MessageType
-	Data interface{} `json:",omitempty"`
+	Type    MessageType
+	Welcome *Welcome    `json:",omitempty"`
+	Error   error       `json:",omitempty"`
+	Data    interface{} `json:",omitempty"`
+	URI     string      `json:",omitempty"`
 }
 
 type Session struct {
@@ -131,7 +193,7 @@ func (self *Session) readLoop() {
 		if message, err := self.parseMessage(buf[:n]); err == nil {
 			self.input <- message
 		} else {
-			self.Send(Message{Type: TypeError, Data: err})
+			self.send(Message{Type: TypeError, Error: err})
 		}
 		n, err = self.ws.Read(buf)
 	}
@@ -171,18 +233,24 @@ func (self *Session) heartbeatLoop() {
 		case <-self.closing:
 			return
 		case <-time.After(self.server.heartbeat / 2):
-			self.Send(Message{Type: TypeHeartbeat})
+			self.send(Message{Type: TypeHeartbeat})
 		}
 	}
 }
 
-func (self *Session) Send(message Message) {
+func (self *Session) send(message Message) {
 	self.output <- message
 }
 
 func (self *Session) handleMessage(message Message) {
 	switch message.Type {
 	case TypeHeartbeat:
+	case TypeMessage:
+		self.server.Emit(message)
+	case TypeUnsubscribe:
+		self.server.removeSubscription(self.id, message.URI, true)
+	case TypeSubscribe:
+		self.server.addSubscription(self, message.URI)
 	default:
 		self.server.logger.Printf("Got message %+v", message)
 	}
@@ -212,9 +280,9 @@ func (self *Session) Handle(ws *websocket.Conn) {
 	go self.writeLoop()
 	go self.heartbeatLoop()
 
-	self.Send(Message{
+	self.send(Message{
 		Type: TypeWelcome,
-		Data: &Welcome{
+		Welcome: &Welcome{
 			Heartbeat:      self.server.heartbeat / time.Millisecond,
 			SessionTimeout: self.server.sessionTimeout / time.Millisecond,
 			Id:             self.id,
