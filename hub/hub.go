@@ -4,6 +4,7 @@ import (
 	"code.google.com/p/go.net/websocket"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -35,8 +36,8 @@ func prettify(obj interface{}) string {
 type Server struct {
 	heartbeat      time.Duration
 	sessionTimeout time.Duration
-	sessions       map[string]*session
-	subscriptions  map[string]map[string]*session
+	sessions       map[string]*Session
+	subscriptions  map[string]map[string]*Session
 	subscribers    map[string]map[string]bool
 	lock           *sync.RWMutex
 	outputBuffer   int
@@ -47,20 +48,20 @@ func NewServer() *Server {
 	return &Server{
 		heartbeat:      defaultHeartbeat,
 		sessionTimeout: defaultSessionTimeout,
-		sessions:       map[string]*session{},
-		subscriptions:  map[string]map[string]*session{},
+		sessions:       map[string]*Session{},
+		subscriptions:  map[string]map[string]*Session{},
 		subscribers:    map[string]map[string]bool{},
 		lock:           &sync.RWMutex{},
 		logger:         log.New(os.Stdout, "pusher: ", 0),
 	}
 }
 
-func (self *Server) addSubscription(sess *session, uri string) {
+func (self *Server) addSubscription(sess *Session, uri string) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
 	if _, found := self.subscriptions[uri]; !found {
-		self.subscriptions[uri] = map[string]*session{}
+		self.subscriptions[uri] = map[string]*Session{}
 	}
 	self.subscriptions[uri][sess.id] = sess
 
@@ -118,7 +119,7 @@ func (self *Server) removeSession(id string) {
 	}
 }
 
-func (self *Server) getSession(id string) (result *session) {
+func (self *Server) getSession(id string) (result *Session) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -126,9 +127,9 @@ func (self *Server) getSession(id string) (result *session) {
 		id = self.randomId()
 	}
 	if result = self.sessions[id]; result == nil {
-		result = &session{
+		result = &Session{
 			output: make(chan Message, defaultOutputBuffer),
-			id:     id,
+			id:     self.randomId(),
 			server: self,
 		}
 		result.cleanupTimer = &time.Timer{}
@@ -139,7 +140,7 @@ func (self *Server) getSession(id string) (result *session) {
 
 func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	self.logger.Printf("%v\t%v\t%v\t%v", time.Now(), r.Method, r.URL, r.RemoteAddr)
-	websocket.Handler(self.getSession(r.URL.Query().Get("session_id")).Handle).ServeHTTP(w, r)
+	websocket.Handler(self.getSession(r.URL.Query().Get("session_id")).handle).ServeHTTP(w, r)
 }
 
 type MessageType string
@@ -156,20 +157,21 @@ const (
 type Welcome struct {
 	Heartbeat      time.Duration
 	SessionTimeout time.Duration
-	Id             string
+	id             string
 }
 
 type Message struct {
 	Type    MessageType
 	Welcome *Welcome    `json:",omitempty"`
-	Error   error       `json:",omitempty"`
+	Error   string      `json:",omitempty"`
 	Data    interface{} `json:",omitempty"`
 	URI     string      `json:",omitempty"`
 }
 
-type session struct {
+type Session struct {
 	ws           *websocket.Conn
 	id           string
+	RemoteAddr   string
 	input        chan Message
 	output       chan Message
 	closing      chan struct{}
@@ -177,12 +179,12 @@ type session struct {
 	cleanupTimer *time.Timer
 }
 
-func (self *session) parseMessage(b []byte) (result Message, err error) {
+func (self *Session) parseMessage(b []byte) (result Message, err error) {
 	err = json.Unmarshal(b, &result)
 	return
 }
 
-func (self *session) readLoop() {
+func (self *Session) readLoop() {
 	defer self.ws.Close()
 	buf := make([]byte, bufLength)
 	n, err := self.ws.Read(buf)
@@ -190,14 +192,14 @@ func (self *session) readLoop() {
 		if message, err := self.parseMessage(buf[:n]); err == nil {
 			self.input <- message
 		} else {
-			self.send(Message{Type: TypeError, Error: err})
+			self.send(Message{Type: TypeError, Error: err.Error(), Data: string(buf[:n])})
 		}
 		n, err = self.ws.Read(buf)
 	}
 	close(self.input)
 }
 
-func (self *session) writeLoop() {
+func (self *Session) writeLoop() {
 	defer self.ws.Close()
 	var message Message
 	var err error
@@ -224,7 +226,7 @@ func (self *session) writeLoop() {
 	}
 }
 
-func (self *session) heartbeatLoop() {
+func (self *Session) heartbeatLoop() {
 	for {
 		select {
 		case <-self.closing:
@@ -235,11 +237,11 @@ func (self *session) heartbeatLoop() {
 	}
 }
 
-func (self *session) send(message Message) {
+func (self *Session) send(message Message) {
 	self.output <- message
 }
 
-func (self *session) handleMessage(message Message) {
+func (self *Session) handleMessage(message Message) {
 	switch message.Type {
 	case TypeHeartbeat:
 	case TypeMessage:
@@ -249,19 +251,20 @@ func (self *session) handleMessage(message Message) {
 	case TypeSubscribe:
 		self.server.addSubscription(self, message.URI)
 	default:
-		self.server.logger.Printf("Got message %+v", message)
+		self.send(Message{Type: TypeError, Error: fmt.Sprintf("Unknown message type %#v", message.Type), Data: message})
 	}
 }
 
-func (self *session) remove() {
+func (self *Session) remove() {
 	self.server.removeSession(self.id)
 }
 
-func (self *session) Handle(ws *websocket.Conn) {
+func (self *Session) handle(ws *websocket.Conn) {
 	self.server.logger.Printf("%v\t%v\t%v\t%v\t%v", time.Now(), ws.Request().Method, ws.Request().URL, ws.Request().RemoteAddr, self.id)
 
 	self.ws = ws
 	defer self.ws.Close()
+	self.RemoteAddr = self.ws.Request().RemoteAddr
 
 	self.cleanupTimer.Stop()
 	defer func() {
@@ -282,7 +285,7 @@ func (self *session) Handle(ws *websocket.Conn) {
 		Welcome: &Welcome{
 			Heartbeat:      self.server.heartbeat / time.Millisecond,
 			SessionTimeout: self.server.sessionTimeout / time.Millisecond,
-			Id:             self.id,
+			id:             self.id,
 		},
 	})
 	var message Message

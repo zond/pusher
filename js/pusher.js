@@ -22,6 +22,8 @@ function Pusher(options) {
 	that.buffer = [];
 	// callbacks
 	that.callbacks = {};
+	// error handler
+	that.onerror = options.onerror || (function(err) {});
 	/*
 	 * set up the socket
 	 */
@@ -38,8 +40,8 @@ function Pusher(options) {
 			  that.send(that.buffer.shift());
 			}
 		};
-		that.socket.onerror = function() {
-			that.close();
+		that.socket.onerror = function(err) {
+			that.onerror(err);
 		};
 		that.socket.onmessage = function(message) {
 			var msg = JSON.parse(message.data);
@@ -55,6 +57,14 @@ function Pusher(options) {
 	that.handleMessage = function(msg) {
 		if (msg.Type == "Welcome") {
 			that.heartbeat = msg.Welcome.Heartbeat;
+			if (msg.Welcome.Id != that.id) {
+			  for (var uri in that.callbacks) {
+					that.send({
+						Type: 'Subscribe',
+						URI: uri,
+					});
+				}
+			}
 			that.id = msg.Welcome.Id;
 			if (that.heartbeater != null) {
 				clearInterval(that.heartbeater);
@@ -77,6 +87,14 @@ function Pusher(options) {
 				  callbacks[callback](msg.Data);
 				}
 			}
+		} else if (msg.Type == "Error") {
+			that.onerror(msg);
+		} else {
+		  that.onerror({
+			  Type: "Error",
+				Error: "Unknown message type " + msg.Type,
+				Data: msg,
+			});
 		}
 	};
 	that.emit = function(uri, data) {
