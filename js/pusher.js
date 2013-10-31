@@ -24,6 +24,8 @@ function Pusher(options) {
   that.callbacks = {};
   // error handler
   that.onerror = options.onerror || (function(err) { console.log('pusher error:', err); });
+  // on connect handler
+  that.onconnect = options.onconnect || (function(msg) { console.log('pusher connected:', msg); });
   /*
    * set up the socket
    */
@@ -78,6 +80,7 @@ function Pusher(options) {
           });
         }
       }, that.heartbeat / 2);
+      that.onconnect(msg);
     } else if (msg.Type == "Heartbeat") {
       that.lastHeartbeatReceived = new Date();
     } else if (msg.Type == "Message") {
