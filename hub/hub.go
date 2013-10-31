@@ -68,8 +68,6 @@ func (self *Server) addSubscription(session *Session, uri string) {
 		self.subscribers[session.id] = map[string]bool{}
 	}
 	self.subscribers[session.id][uri] = true
-
-	self.logger.Printf("added subscriber:\n%v", prettify(self.subscriptions))
 }
 
 func (self *Server) Emit(message Message) {
@@ -77,7 +75,6 @@ func (self *Server) Emit(message Message) {
 	defer self.lock.Unlock()
 
 	for _, session := range self.subscriptions[message.URI] {
-		self.logger.Printf("sending %+v to %v", message, session.id)
 		session.send(message)
 	}
 }

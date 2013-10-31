@@ -20,6 +20,8 @@ function Pusher(options) {
 	that.reconnector = null;
 	// buffer while closed
 	that.buffer = [];
+	// callbacks
+	that.callbacks = {};
 	/*
 	 * set up the socket
 	 */
@@ -69,7 +71,43 @@ function Pusher(options) {
 		} else if (msg.Type == "Heartbeat") {
 			that.lastHeartbeatReceived = new Date();
 		} else if (msg.Type == "Message") {
-			console.log('message', msg);
+			var callbacks = that.callbacks[msg.URI];
+			if (callbacks != null) {
+			  for (var callback in callbacks) {
+				  callbacks[callback](msg.Data);
+				}
+			}
+		}
+	};
+	that.emit = function(uri, data) {
+	  that.send({
+		  Type: 'Message',
+			URI: uri,
+			Data: data,
+		});
+	};
+	that.on = function(uri, callback) {
+	  if (that.callbacks[uri] == null) {
+		  that.callbacks[uri] = {};
+			that.send({
+				Type: 'Subscribe',
+				URI: uri,
+			});
+		}
+		that.callbacks[uri][callback] = callback;
+	};
+	that.off = function(uri, callback) {
+	  delete(that.callbacks[uri][callback]);
+		var left = 0;
+	  for (var callback in that.callbacks[uri]) {
+		  left++;
+		}
+		if (left == 0) {
+		  that.send({
+			  Type: 'Unsubscribe',
+				URI: uri,
+			});
+			delete(that.callbacks[uri]);
 		}
 	};
 	/*
