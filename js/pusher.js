@@ -151,14 +151,18 @@ function Pusher(options) {
         URI: uri,
         Data: args.slice(1),
         Id: true,
-        errback: function() {
-          that.send({
-            Type: 'Authorize',
-            URI: uri,
-            Write: true,
-            Id: true,
-            callback: sendFunc
-          });
+        errback: function(err) {
+          if (err.Error.Type == "AuthorizationError") {
+            that.send({
+              Type: 'Authorize',
+              URI: uri,
+              Write: true,
+              Id: true,
+              callback: sendFunc
+            });
+          } else {
+            that.onerror(err);
+          }
         }
     };
     msg.callback = function() {
@@ -185,15 +189,19 @@ function Pusher(options) {
             callback(uri);
           }
         },
-        errback: function() {
-          that.send({
-            Type: 'Authorize',
-            URI: uri,
-            Id: true,
-            callback: function() {
-              that.on(uri, subscription, callback);
-            }
-          });
+        errback: function(err) {
+          if (err.Error.Type == "AuthorizationError") {
+            that.send({
+              Type: 'Authorize',
+              URI: uri,
+              Id: true,
+              callback: function() {
+                that.on(uri, subscription, callback);
+              }
+            });
+          } else {
+            that.onerror(err)
+          }
         }
       });
     }
