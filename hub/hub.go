@@ -35,8 +35,8 @@ func prettify(obj interface{}) string {
 type Server struct {
 	heartbeat      time.Duration
 	sessionTimeout time.Duration
-	sessions       map[string]*Session
-	subscriptions  map[string]map[string]*Session
+	sessions       map[string]*session
+	subscriptions  map[string]map[string]*session
 	subscribers    map[string]map[string]bool
 	lock           *sync.RWMutex
 	outputBuffer   int
@@ -47,35 +47,35 @@ func NewServer() *Server {
 	return &Server{
 		heartbeat:      defaultHeartbeat,
 		sessionTimeout: defaultSessionTimeout,
-		sessions:       map[string]*Session{},
-		subscriptions:  map[string]map[string]*Session{},
+		sessions:       map[string]*session{},
+		subscriptions:  map[string]map[string]*session{},
 		subscribers:    map[string]map[string]bool{},
 		lock:           &sync.RWMutex{},
 		logger:         log.New(os.Stdout, "pusher: ", 0),
 	}
 }
 
-func (self *Server) addSubscription(session *Session, uri string) {
+func (self *Server) addSubscription(sess *session, uri string) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
 	if _, found := self.subscriptions[uri]; !found {
-		self.subscriptions[uri] = map[string]*Session{}
+		self.subscriptions[uri] = map[string]*session{}
 	}
-	self.subscriptions[uri][session.id] = session
+	self.subscriptions[uri][sess.id] = sess
 
-	if _, found := self.subscribers[session.id]; !found {
-		self.subscribers[session.id] = map[string]bool{}
+	if _, found := self.subscribers[sess.id]; !found {
+		self.subscribers[sess.id] = map[string]bool{}
 	}
-	self.subscribers[session.id][uri] = true
+	self.subscribers[sess.id][uri] = true
 }
 
 func (self *Server) Emit(message Message) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	for _, session := range self.subscriptions[message.URI] {
-		session.send(message)
+	for _, sess := range self.subscriptions[message.URI] {
+		sess.send(message)
 	}
 }
 
@@ -118,7 +118,7 @@ func (self *Server) removeSession(id string) {
 	}
 }
 
-func (self *Server) getSession(id string) (result *Session) {
+func (self *Server) getSession(id string) (result *session) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -126,7 +126,7 @@ func (self *Server) getSession(id string) (result *Session) {
 		id = self.randomId()
 	}
 	if result = self.sessions[id]; result == nil {
-		result = &Session{
+		result = &session{
 			output: make(chan Message, defaultOutputBuffer),
 			id:     id,
 			server: self,
@@ -167,7 +167,7 @@ type Message struct {
 	URI     string      `json:",omitempty"`
 }
 
-type Session struct {
+type session struct {
 	ws           *websocket.Conn
 	id           string
 	input        chan Message
@@ -177,12 +177,12 @@ type Session struct {
 	cleanupTimer *time.Timer
 }
 
-func (self *Session) parseMessage(b []byte) (result Message, err error) {
+func (self *session) parseMessage(b []byte) (result Message, err error) {
 	err = json.Unmarshal(b, &result)
 	return
 }
 
-func (self *Session) readLoop() {
+func (self *session) readLoop() {
 	defer self.ws.Close()
 	buf := make([]byte, bufLength)
 	n, err := self.ws.Read(buf)
@@ -197,7 +197,7 @@ func (self *Session) readLoop() {
 	close(self.input)
 }
 
-func (self *Session) writeLoop() {
+func (self *session) writeLoop() {
 	defer self.ws.Close()
 	var message Message
 	var err error
@@ -224,7 +224,7 @@ func (self *Session) writeLoop() {
 	}
 }
 
-func (self *Session) heartbeatLoop() {
+func (self *session) heartbeatLoop() {
 	for {
 		select {
 		case <-self.closing:
@@ -235,11 +235,11 @@ func (self *Session) heartbeatLoop() {
 	}
 }
 
-func (self *Session) send(message Message) {
+func (self *session) send(message Message) {
 	self.output <- message
 }
 
-func (self *Session) handleMessage(message Message) {
+func (self *session) handleMessage(message Message) {
 	switch message.Type {
 	case TypeHeartbeat:
 	case TypeMessage:
@@ -253,11 +253,11 @@ func (self *Session) handleMessage(message Message) {
 	}
 }
 
-func (self *Session) remove() {
+func (self *session) remove() {
 	self.server.removeSession(self.id)
 }
 
-func (self *Session) Handle(ws *websocket.Conn) {
+func (self *session) Handle(ws *websocket.Conn) {
 	self.server.logger.Printf("%v\t%v\t%v\t%v\t%v", time.Now(), ws.Request().Method, ws.Request().URL, ws.Request().RemoteAddr, self.id)
 
 	self.ws = ws
