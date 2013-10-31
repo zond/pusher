@@ -25,7 +25,9 @@
 
     $("#f").submit(function(event) {
       event.preventDefault();
-      pusher.emit("/foo", "Message", $("input[name=data]", this).val());
+      pusher.emit("/foo", "Message", $("input[name=data]", this).val(), function(msg) { 
+        $("#r").prepend("<p><h2>Sent</h2>" + msg.Id +"</p>");
+      });
     });
 
     $("#reset").click(function(event) {
