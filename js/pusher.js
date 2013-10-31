@@ -23,7 +23,7 @@ function Pusher(options) {
 	// callbacks
 	that.callbacks = {};
 	// error handler
-	that.onerror = options.onerror || (function(err) { console.log(err); });
+	that.onerror = options.onerror || (function(err) { console.log('pusher error:', err); });
 	/*
 	 * set up the socket
 	 */
