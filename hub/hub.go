@@ -390,6 +390,7 @@ func (self *Session) terminate() {
 		close(self.closing)
 	}
 	self.server.logger.Printf("%v\t[ws]\t[disconnect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
+	self.cleanupTimer.Stop()
 	self.cleanupTimer = time.AfterFunc(self.server.sessionTimeout, self.remove)
 }
 
