@@ -137,10 +137,16 @@ function Pusher(options) {
   };
   that.emit = function(uri) {
     // Copy arguments, becouse slice changes it.
-    var args = Array.prototype.slice.call(arguments, 0);
+    var args = null;
+    var callback = null;
+    if (typeof (arguments[arguments.length-1]) === "function") {
+      args = Array.prototype.slice.call(arguments, 0, arguments.length - 1);
+      callback = arguments[arguments.length - 1];
+    } else {
+      args = Array.prototype.slice.call(arguments, 0);
+    }
     var sendFunc = null;
-    sendFunc = function() {
-      that.send({
+    var msg = {
         Type: 'Message',
         URI: uri,
         Data: args.slice(1),
@@ -154,7 +160,12 @@ function Pusher(options) {
             callback: sendFunc
           });
         }
-      });
+    };
+    msg.callback = function() {
+      callback(msg);
+    };
+    sendFunc = function() {
+      that.send(msg);
     };
     sendFunc();
   };
