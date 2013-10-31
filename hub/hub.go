@@ -128,15 +128,14 @@ func (self *Server) removeSession(id string) {
 	for uri, _ := range self.subscribers[id] {
 		self.removeSubscription(id, uri, false)
 	}
+	self.logger.Printf("%v\t[ws]\t[cleanup]\t%v", time.Now(), id)
 }
 
 func (self *Server) getSession(id string) (result *Session) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	if id == "" {
-		id = self.randomId()
-	}
+	// if the id is not found (because the server restarted, or the client gave the initial empty id) we just create a new id and insert a new session
 	if result = self.sessions[id]; result == nil {
 		result = &Session{
 			output:         make(chan Message, defaultOutputBuffer),
@@ -146,7 +145,7 @@ func (self *Server) getSession(id string) (result *Session) {
 			lock:           &sync.RWMutex{},
 		}
 		result.cleanupTimer = &time.Timer{}
-		self.sessions[id] = result
+		self.sessions[result.id] = result
 	}
 	return
 }
