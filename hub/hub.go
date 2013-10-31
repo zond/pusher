@@ -25,7 +25,7 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-type Authorizer func(uri, token string) (authorized bool, err error)
+type Authorizer func(uri, token string, write bool) (authorized bool, err error)
 
 func prettify(obj interface{}) string {
 	b, err := json.MarshalIndent(obj, "", "  ")
@@ -56,7 +56,7 @@ func NewServer() *Server {
 		subscribers:    map[string]map[string]bool{},
 		lock:           &sync.RWMutex{},
 		logger:         log.New(os.Stdout, "pusher: ", 0),
-		authorizer: func(uri, token string) (bool, error) {
+		authorizer: func(uri, token string, write bool) (bool, error) {
 			return true, nil
 		},
 	}
@@ -171,7 +171,7 @@ const (
 type Welcome struct {
 	Heartbeat      time.Duration
 	SessionTimeout time.Duration
-	id             string
+	Id             string
 }
 
 type Message struct {
@@ -181,6 +181,7 @@ type Message struct {
 	Data    interface{} `json:",omitempty"`
 	URI     string      `json:",omitempty"`
 	Token   string      `json:",omitempty"`
+	Write   bool        `json:",omitempty"`
 }
 
 type Session struct {
@@ -254,10 +255,14 @@ func (self *Session) heartbeatLoop() {
 	}
 }
 
-func (self *Session) authorized(auth string) bool {
+func (self *Session) authorized(uri string, wantWrite bool) bool {
 	self.lock.RLock()
 	defer self.lock.RUnlock()
-	return self.authorizations[auth]
+	hasWrite, found := self.authorizations[uri]
+	if !found {
+		return false
+	}
+	return !wantWrite || hasWrite
 }
 
 func (self *Session) send(message Message) {
@@ -268,7 +273,7 @@ func (self *Session) handleMessage(message Message) {
 	switch message.Type {
 	case TypeHeartbeat:
 	case TypeMessage:
-		if !self.authorized(message.URI) {
+		if !self.authorized(message.URI, true) {
 			self.send(Message{Type: TypeError, Error: fmt.Sprintf("%v not authorized for %v", self.id, message.URI), Data: message})
 			return
 		}
@@ -276,13 +281,13 @@ func (self *Session) handleMessage(message Message) {
 	case TypeUnsubscribe:
 		self.server.removeSubscription(self.id, message.URI, true)
 	case TypeSubscribe:
-		if !self.authorized(message.URI) {
+		if !self.authorized(message.URI, false) {
 			self.send(Message{Type: TypeError, Error: fmt.Sprintf("%v not authorized for %v", self.id, message.URI), Data: message})
 			return
 		}
 		self.server.addSubscription(self, message.URI)
 	case TypeAuthorize:
-		ok, err := self.server.authorizer(message.URI, message.Token)
+		ok, err := self.server.authorizer(message.URI, message.Token, message.Write)
 		if err != nil {
 			self.send(Message{Type: TypeError, Error: err.Error(), Data: message})
 			return
@@ -290,7 +295,7 @@ func (self *Session) handleMessage(message Message) {
 		if ok {
 			self.lock.Lock()
 			defer self.lock.Unlock()
-			self.authorizations[message.URI] = true
+			self.authorizations[message.URI] = message.Write
 		}
 	default:
 		self.send(Message{Type: TypeError, Error: fmt.Sprintf("Unknown message type %#v", message.Type), Data: message})
@@ -328,7 +333,7 @@ func (self *Session) handle(ws *websocket.Conn) {
 		Welcome: &Welcome{
 			Heartbeat:      self.server.heartbeat / time.Millisecond,
 			SessionTimeout: self.server.sessionTimeout / time.Millisecond,
-			id:             self.id,
+			Id:             self.id,
 		},
 	})
 	var message Message

@@ -61,7 +61,7 @@ function Pusher(options) {
 			  for (var uri in that.callbacks) {
 					that.send({
 						Type: 'Subscribe',
-						URI: uri,
+						URI: uri
 					});
 				}
 			}
@@ -74,7 +74,7 @@ function Pusher(options) {
 					that.close()
 				} else {
 					that.send({
-						Type: "Heartbeat",
+						Type: "Heartbeat"
 					});
 				}
 			}, that.heartbeat / 2);
@@ -89,29 +89,30 @@ function Pusher(options) {
 			}
 		} else if (msg.Type == "Error") {
 		  if (msg.Data.Type == "Subscribe") {
-		    delete(that.callbacks[msg.Data.URI]);	  
+		    delete(that.callbacks[msg.Data.URI]);
 			}
 			that.onerror(msg);
 		} else {
 		  that.onerror({
 			  Type: "Error",
 				Error: "Unknown message type " + msg.Type,
-				Data: msg,
+				Data: msg
 			});
 		}
 	};
-	that.authorize = function(uri, token) {
+	that.authorize = function(uri, token, write) {
 	  that.send({
 		  Type: 'Authorize',
 			URI: uri,
 			Token: token,
+      Write: write
 		});
 	};
 	that.emit = function(uri, data) {
 	  that.send({
 		  Type: 'Message',
 			URI: uri,
-			Data: data,
+			Data: data
 		});
 	};
 	that.on = function(uri, callback) {
@@ -119,7 +120,7 @@ function Pusher(options) {
 		  that.callbacks[uri] = {};
 			that.send({
 				Type: 'Subscribe',
-				URI: uri,
+				URI: uri
 			});
 		}
 		that.callbacks[uri][callback] = callback;
@@ -133,7 +134,7 @@ function Pusher(options) {
 		if (left == 0) {
 		  that.send({
 			  Type: 'Unsubscribe',
-				URI: uri,
+				URI: uri
 			});
 			delete(that.callbacks[uri]);
 		}
