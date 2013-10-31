@@ -11,7 +11,6 @@
     pusher.onconnect = function(msg) {
       $("#r").prepend("<p><h2>CONNECT</h2>" + JSON.stringify(msg, "", 2) +"</p>");
     }
-    pusher.authorize("/foo", "", true);
 
     pusher.onerror = function(err) {
       $("#r").prepend("<p><h2>ERROR</h2>" + JSON.stringify(err, "", 2) +"</p>");
