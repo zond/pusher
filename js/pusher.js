@@ -84,7 +84,7 @@ function Pusher(options) {
 			var callbacks = that.callbacks[msg.URI];
 			if (callbacks != null) {
 			  for (var callback in callbacks) {
-				  callbacks[callback](msg.Data);
+				  callbacks[callback].apply(msg, msg.Data);
 				}
 			}
 		} else if (msg.Type == "Error") {
@@ -109,10 +109,12 @@ function Pusher(options) {
 		});
 	};
 	that.emit = function(uri, data) {
+    // Copy arguments, becouse slice changes it.
+    var args = Array.prototype.slice.call(arguments, 0);
 	  that.send({
 		  Type: 'Message',
 			URI: uri,
-			Data: data
+			Data: args.slice(1)
 		});
 	};
 	that.on = function(uri, callback) {

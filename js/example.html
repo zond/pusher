@@ -7,12 +7,12 @@
   $(function() {
     var pusher = new Pusher({url: "ws://localhost:2222"});
     pusher.authorize("/foo", "", true)
-    pusher.on("/foo", function(data) {
-      $("#r").append("<h2>" + data +"</h2>");
+    pusher.on("/foo", function(type, text) {
+      $("#r").append("<p><h2>" + type + "</h2>" + text +"</p>");
     });
     $("#f").submit(function(event) {
       event.preventDefault();
-      pusher.emit("/foo", $("input[name=data]", this).val());
+      pusher.emit("/foo", "Message", $("input[name=data]", this).val());
     });
   });
   </script>
