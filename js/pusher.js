@@ -157,6 +157,7 @@ function Pusher(options) {
               Type: 'Authorize',
               URI: uri,
               Write: true,
+              Token: that.authorizer(uri, true),
               Id: true,
               callback: sendFunc
             });
@@ -195,6 +196,7 @@ function Pusher(options) {
               Type: 'Authorize',
               URI: uri,
               Id: true,
+              Token: that.authorizer(uri, false),
               callback: function() {
                 that.on(uri, subscription, callback);
               }
