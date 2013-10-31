@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	defaultOutputBuffer   = 1024
+	defaultBufferSize     = 1024
 	defaultHeartbeat      = time.Second * 5
 	defaultSessionTimeout = time.Second * 30
 	idLength              = 16
@@ -42,7 +42,7 @@ type Server struct {
 	subscriptions  map[string]map[string]*Session
 	subscribers    map[string]map[string]bool
 	lock           *sync.RWMutex
-	outputBuffer   int
+	bufferSize     int
 	logger         *log.Logger
 	authorizer     Authorizer
 }
@@ -50,6 +50,7 @@ type Server struct {
 func NewServer() *Server {
 	return &Server{
 		heartbeat:      defaultHeartbeat,
+		bufferSize:     defaultBufferSize,
 		sessionTimeout: defaultSessionTimeout,
 		sessions:       map[string]*Session{},
 		subscriptions:  map[string]map[string]*Session{},
@@ -138,7 +139,7 @@ func (self *Server) getSession(id string) (result *Session) {
 	// if the id is not found (because the server restarted, or the client gave the initial empty id) we just create a new id and insert a new session
 	if result = self.sessions[id]; result == nil {
 		result = &Session{
-			output:         make(chan Message, defaultOutputBuffer),
+			output:         make(chan Message, self.bufferSize),
 			id:             self.randomId(),
 			server:         self,
 			authorizations: map[string]bool{},
@@ -156,6 +157,7 @@ func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type MessageType string
+type ErrorType string
 
 const (
 	TypeError       = "Error"
@@ -165,6 +167,13 @@ const (
 	TypeUnsubscribe = "Unsubscribe"
 	TypeMessage     = "Message"
 	TypeAuthorize   = "Authorize"
+	TypeAck         = "Ack"
+)
+
+const (
+	TypeJSONError          = "JSONError"
+	TypeAuthorizationError = "AuthorizationError"
+	TypeSyntaxError        = "SyntaxError"
 )
 
 type Welcome struct {
@@ -173,10 +182,16 @@ type Welcome struct {
 	Id             string
 }
 
+type Error struct {
+	Message string
+	Type    ErrorType
+}
+
 type Message struct {
 	Type    MessageType
+	Id      string      `json:",omitempty"`
 	Welcome *Welcome    `json:",omitempty"`
-	Error   string      `json:",omitempty"`
+	Error   *Error      `json:",omitempty"`
 	Data    interface{} `json:",omitempty"`
 	URI     string      `json:",omitempty"`
 	Token   string      `json:",omitempty"`
@@ -202,22 +217,27 @@ func (self *Session) parseMessage(b []byte) (result Message, err error) {
 }
 
 func (self *Session) readLoop() {
-	defer self.ws.Close()
+	defer self.terminate()
 	buf := make([]byte, bufLength)
 	n, err := self.ws.Read(buf)
 	for err == nil {
 		if message, err := self.parseMessage(buf[:n]); err == nil {
 			self.input <- message
 		} else {
-			self.send(Message{Type: TypeError, Error: err.Error(), Data: string(buf[:n])})
+			self.send(Message{
+				Type: TypeError,
+				Error: &Error{
+					Message: err.Error(),
+					Type:    TypeJSONError,
+				},
+				Data: string(buf[:n])})
 		}
 		n, err = self.ws.Read(buf)
 	}
-	close(self.input)
 }
 
 func (self *Session) writeLoop() {
-	defer self.ws.Close()
+	defer self.terminate()
 	var message Message
 	var err error
 	var n int
@@ -265,7 +285,15 @@ func (self *Session) authorized(uri string, wantWrite bool) bool {
 }
 
 func (self *Session) send(message Message) {
-	self.output <- message
+	self.pushOutput(message)
+}
+
+func (self *Session) pushOutput(message Message) {
+	select {
+	case self.output <- message:
+	default:
+		self.server.logger.Printf("Unable to send %+v to %+v, output buffer full", message, self)
+	}
 }
 
 func (self *Session) handleMessage(message Message) {
@@ -273,7 +301,15 @@ func (self *Session) handleMessage(message Message) {
 	case TypeHeartbeat:
 	case TypeMessage:
 		if !self.authorized(message.URI, true) {
-			self.send(Message{Type: TypeError, Error: fmt.Sprintf("%v not authorized for %v", self.id, message.URI), Data: message})
+			self.send(Message{
+				Type: TypeError,
+				Id:   message.Id,
+				Error: &Error{
+					Message: fmt.Sprintf("%v not authorized for writing to %v", self.id, message.URI),
+					Type:    TypeAuthorizationError,
+				},
+				Data: message,
+			})
 			return
 		}
 		self.server.Emit(message)
@@ -281,47 +317,92 @@ func (self *Session) handleMessage(message Message) {
 		self.server.removeSubscription(self.id, message.URI, true)
 	case TypeSubscribe:
 		if !self.authorized(message.URI, false) {
-			self.send(Message{Type: TypeError, Error: fmt.Sprintf("%v not authorized for %v", self.id, message.URI), Data: message})
+			self.send(Message{
+				Type: TypeError,
+				Id:   message.Id,
+				Error: &Error{
+					Message: fmt.Sprintf("%v not authorized for subscribing to %v", self.id, message.URI),
+					Type:    TypeAuthorizationError,
+				},
+				Data: message,
+			})
 			return
 		}
 		self.server.addSubscription(self, message.URI)
 	case TypeAuthorize:
 		ok, err := self.server.authorizer(message.URI, message.Token, message.Write)
 		if err != nil {
-			self.send(Message{Type: TypeError, Error: err.Error(), Data: message})
+			self.send(Message{
+				Type: TypeError,
+				Id:   message.Id,
+				Error: &Error{
+					Message: err.Error(),
+					Type:    TypeAuthorizationError,
+				}, Data: message,
+			})
 			return
 		}
-		if ok {
-			self.lock.Lock()
-			defer self.lock.Unlock()
-			self.authorizations[message.URI] = message.Write
+		if !ok {
+			self.send(Message{
+				Type: TypeError,
+				Id:   message.Id,
+				Error: &Error{
+					Message: fmt.Sprintf("%v does not provide authorization for %v", message.Token, message.URI),
+					Type:    TypeAuthorizationError,
+				}, Data: message,
+			})
+			return
 		}
+		self.lock.Lock()
+		defer self.lock.Unlock()
+		self.authorizations[message.URI] = (self.authorizations[message.URI] || message.Write)
+		self.server.logger.Printf("%v\t[ws]\t[authorize]\t%v\t%v\t%v", time.Now(), self.RemoteAddr, self.id, message.URI)
 	default:
-		self.send(Message{Type: TypeError, Error: fmt.Sprintf("Unknown message type %#v", message.Type), Data: message})
+		self.send(Message{
+			Type: TypeError,
+			Id:   message.Id,
+			Error: &Error{
+				Message: fmt.Sprintf("Unknown message type %#v", message.Type),
+				Type:    TypeSyntaxError,
+			},
+			Data: message,
+		})
+		return
 	}
+	if message.Id != "" {
+		self.send(Message{
+			Type: TypeAck,
+			Id:   message.Id,
+		})
+	}
+
 }
 
 func (self *Session) remove() {
 	self.server.removeSession(self.id)
 }
 
+func (self *Session) terminate() {
+	self.ws.Close()
+	select {
+	case _ = <-self.closing:
+	default:
+		close(self.closing)
+	}
+	self.server.logger.Printf("%v\t[ws]\t[disconnect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
+	self.cleanupTimer = time.AfterFunc(self.server.sessionTimeout, self.remove)
+}
+
 func (self *Session) handle(ws *websocket.Conn) {
 	self.server.logger.Printf("%v\t[ws]\t[connect]\t%v\t%v", time.Now(), ws.Request().RemoteAddr, self.id)
 
+	defer self.terminate()
+
 	self.ws = ws
-	defer self.ws.Close()
 	self.RemoteAddr = self.ws.Request().RemoteAddr
-
 	self.cleanupTimer.Stop()
-	defer func() {
-		self.server.logger.Printf("%v\t[ws]\t[disconnect]\t%v\t%v", time.Now(), ws.Request().RemoteAddr, self.id)
-		self.cleanupTimer = time.AfterFunc(self.server.sessionTimeout, self.remove)
-	}()
-
 	self.input = make(chan Message)
-
 	self.closing = make(chan struct{})
-	defer close(self.closing)
 
 	go self.readLoop()
 	go self.writeLoop()
@@ -336,13 +417,11 @@ func (self *Session) handle(ws *websocket.Conn) {
 		},
 	})
 	var message Message
-	var ok bool
 	for {
 		select {
-		case message, ok = <-self.input:
-			if !ok {
-				return
-			}
+		case _ = <-self.closing:
+			return
+		case message = <-self.input:
 			self.handleMessage(message)
 		case <-time.After(self.server.heartbeat):
 			return
