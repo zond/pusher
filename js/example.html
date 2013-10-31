@@ -1,0 +1,29 @@
+
+<html>
+  <head>
+   <script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+  <script src="pusher.js"></script>
+  <script>
+  $(function() {
+    var pusher = new Pusher({url: "ws://localhost:2222"});
+    pusher.authorize("/foo", "", true)
+    pusher.on("/foo", function(data) {
+      $("#r").append("<h2>" + data +"</h2>");
+    });
+    $("#f").submit(function(event) {
+      event.preventDefault();
+      pusher.emit("/foo", $("input[name=data]", this).val());
+    });
+  });
+  </script>
+  </head>
+  <body>
+    <form id="f">
+      <input type="text" name="data" value="testdata">
+      <input type="submit" value="skicka">
+    </form>
+    <pre id="r">
+
+    </pre>
+  </body>
+</html>
