@@ -25,6 +25,8 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+type Authorizer func(uri, token string) (authorized bool, err error)
+
 func prettify(obj interface{}) string {
 	b, err := json.MarshalIndent(obj, "", "  ")
 	if err != nil {
@@ -42,6 +44,7 @@ type Server struct {
 	lock           *sync.RWMutex
 	outputBuffer   int
 	logger         *log.Logger
+	authorizer     Authorizer
 }
 
 func NewServer() *Server {
@@ -53,7 +56,15 @@ func NewServer() *Server {
 		subscribers:    map[string]map[string]bool{},
 		lock:           &sync.RWMutex{},
 		logger:         log.New(os.Stdout, "pusher: ", 0),
+		authorizer: func(uri, token string) (bool, error) {
+			return true, nil
+		},
 	}
+}
+
+func (self *Server) Authorizer(f Authorizer) *Server {
+	self.authorizer = f
+	return self
 }
 
 func (self *Server) addSubscription(sess *Session, uri string) {
@@ -69,6 +80,8 @@ func (self *Server) addSubscription(sess *Session, uri string) {
 		self.subscribers[sess.id] = map[string]bool{}
 	}
 	self.subscribers[sess.id][uri] = true
+
+	self.logger.Printf("%v\t[ws]\t%v\t%v\t%v\t[subscribe]", time.Now(), uri, sess.RemoteAddr, sess.id)
 }
 
 func (self *Server) Emit(message Message) {
@@ -95,6 +108,7 @@ func (self *Server) removeSubscription(id, uri string, withLocking bool) {
 	if len(self.subscribers[id]) == 0 {
 		delete(self.subscribers, id)
 	}
+	self.logger.Printf("%v\t[ws]\t%v\t%v\t-\t[unsubscribe]", time.Now(), uri, id)
 }
 
 func (self *Server) randomId() string {
@@ -111,9 +125,6 @@ func (self *Server) removeSession(id string) {
 
 	delete(self.sessions, id)
 
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
 	for uri, _ := range self.subscribers[id] {
 		self.removeSubscription(id, uri, false)
 	}
@@ -128,9 +139,11 @@ func (self *Server) getSession(id string) (result *Session) {
 	}
 	if result = self.sessions[id]; result == nil {
 		result = &Session{
-			output: make(chan Message, defaultOutputBuffer),
-			id:     self.randomId(),
-			server: self,
+			output:         make(chan Message, defaultOutputBuffer),
+			id:             self.randomId(),
+			server:         self,
+			authorizations: map[string]bool{},
+			lock:           &sync.RWMutex{},
 		}
 		result.cleanupTimer = &time.Timer{}
 		self.sessions[id] = result
@@ -152,6 +165,7 @@ const (
 	TypeSubscribe   = "Subscribe"
 	TypeUnsubscribe = "Unsubscribe"
 	TypeMessage     = "Message"
+	TypeAuthorize   = "Authorize"
 )
 
 type Welcome struct {
@@ -166,17 +180,20 @@ type Message struct {
 	Error   string      `json:",omitempty"`
 	Data    interface{} `json:",omitempty"`
 	URI     string      `json:",omitempty"`
+	Token   string      `json:",omitempty"`
 }
 
 type Session struct {
-	ws           *websocket.Conn
-	id           string
-	RemoteAddr   string
-	input        chan Message
-	output       chan Message
-	closing      chan struct{}
-	server       *Server
-	cleanupTimer *time.Timer
+	ws             *websocket.Conn
+	id             string
+	RemoteAddr     string
+	input          chan Message
+	output         chan Message
+	closing        chan struct{}
+	server         *Server
+	cleanupTimer   *time.Timer
+	authorizations map[string]bool
+	lock           *sync.RWMutex
 }
 
 func (self *Session) parseMessage(b []byte) (result Message, err error) {
@@ -237,6 +254,12 @@ func (self *Session) heartbeatLoop() {
 	}
 }
 
+func (self *Session) authorized(auth string) bool {
+	self.lock.RLock()
+	defer self.lock.RUnlock()
+	return self.authorizations[auth]
+}
+
 func (self *Session) send(message Message) {
 	self.output <- message
 }
@@ -245,11 +268,30 @@ func (self *Session) handleMessage(message Message) {
 	switch message.Type {
 	case TypeHeartbeat:
 	case TypeMessage:
+		if !self.authorized(message.URI) {
+			self.send(Message{Type: TypeError, Error: fmt.Sprintf("%v not authorized for %v", self.id, message.URI), Data: message})
+			return
+		}
 		self.server.Emit(message)
 	case TypeUnsubscribe:
 		self.server.removeSubscription(self.id, message.URI, true)
 	case TypeSubscribe:
+		if !self.authorized(message.URI) {
+			self.send(Message{Type: TypeError, Error: fmt.Sprintf("%v not authorized for %v", self.id, message.URI), Data: message})
+			return
+		}
 		self.server.addSubscription(self, message.URI)
+	case TypeAuthorize:
+		ok, err := self.server.authorizer(message.URI, message.Token)
+		if err != nil {
+			self.send(Message{Type: TypeError, Error: err.Error(), Data: message})
+			return
+		}
+		if ok {
+			self.lock.Lock()
+			defer self.lock.Unlock()
+			self.authorizations[message.URI] = true
+		}
 	default:
 		self.send(Message{Type: TypeError, Error: fmt.Sprintf("Unknown message type %#v", message.Type), Data: message})
 	}
@@ -260,7 +302,7 @@ func (self *Session) remove() {
 }
 
 func (self *Session) handle(ws *websocket.Conn) {
-	self.server.logger.Printf("%v\t%v\t%v\t%v\t%v", time.Now(), ws.Request().Method, ws.Request().URL, ws.Request().RemoteAddr, self.id)
+	self.server.logger.Printf("%v\t[ws]\t[connect]\t%v\t%v", time.Now(), ws.Request().RemoteAddr, self.id)
 
 	self.ws = ws
 	defer self.ws.Close()
@@ -268,6 +310,7 @@ func (self *Session) handle(ws *websocket.Conn) {
 
 	self.cleanupTimer.Stop()
 	defer func() {
+		self.server.logger.Printf("%v\t[ws]\t[disconnect]\t%v\t%v", time.Now(), ws.Request().RemoteAddr, self.id)
 		self.cleanupTimer = time.AfterFunc(self.server.sessionTimeout, self.remove)
 	}()
 

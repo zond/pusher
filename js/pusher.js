@@ -23,7 +23,7 @@ function Pusher(options) {
 	// callbacks
 	that.callbacks = {};
 	// error handler
-	that.onerror = options.onerror || (function(err) {});
+	that.onerror = options.onerror || (function(err) { console.log(err); });
 	/*
 	 * set up the socket
 	 */
@@ -88,6 +88,9 @@ function Pusher(options) {
 				}
 			}
 		} else if (msg.Type == "Error") {
+		  if (msg.Data.Type == "Subscribe") {
+		    delete(that.callbacks[msg.Data.URI]);	  
+			}
 			that.onerror(msg);
 		} else {
 		  that.onerror({
@@ -96,6 +99,13 @@ function Pusher(options) {
 				Data: msg,
 			});
 		}
+	};
+	that.authorize = function(uri, token) {
+	  that.send({
+		  Type: 'Authorize',
+			URI: uri,
+			Token: token,
+		});
 	};
 	that.emit = function(uri, data) {
 	  that.send({
