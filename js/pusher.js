@@ -72,12 +72,12 @@ function Pusher(options) {
     if (msg.Type == "Welcome") {
       that.heartbeat = msg.Welcome.Heartbeat;
       if (that.id != null && msg.Welcome.Id != that.id) {
-        for (var uri in that.subscriptions) {
-          that.send({
-            Type: 'Subscribe',
-            URI: uri,
-            Id: true
-          });
+        var oldSubscriptions = that.subscriptions;
+        that.subscriptions = {};
+        for (var uri in oldSubscriptions) {
+          for (var i = 0; i < oldSubscriptions[uri].length; i++) {
+            that.on(uri, oldSubscriptions[uri][i]);
+          }
         }
       }
       that.id = msg.Welcome.Id;
@@ -135,26 +135,57 @@ function Pusher(options) {
       });
     }
   };
-  that.emit = function(uri, data) {
+  that.emit = function(uri) {
     // Copy arguments, becouse slice changes it.
     var args = Array.prototype.slice.call(arguments, 0);
-    that.send({
-      Type: 'Message',
-      URI: uri,
-      Data: args.slice(1),
-      Id: true
-    });
+    var sendFunc = null;
+    sendFunc = function() {
+      that.send({
+        Type: 'Message',
+        URI: uri,
+        Data: args.slice(1),
+        Id: true,
+        errback: function() {
+          that.send({
+            Type: 'Authorize',
+            URI: uri,
+            Write: true,
+            Id: true,
+            callback: sendFunc
+          });
+        }
+      });
+    };
+    sendFunc();
   };
-  that.on = function(uri, subscription) {
+  that.on = function(uri, subscription, callback) {
     if (that.subscriptions[uri] == null) {
-      that.subscriptions[uri] = {};
       that.send({
         Type: 'Subscribe',
         URI: uri,
-        Id: true
+        Id: true,
+        callback: function() {
+          console.log("subscribed to", uri);
+          if (that.subscriptions[uri] == null) {
+            that.subscriptions[uri] = {};
+          }
+          that.subscriptions[uri][subscription] = subscription;
+          if (callback != null) {
+            callback(uri);
+          }
+        },
+        errback: function() {
+          that.send({
+            Type: 'Authorize',
+            URI: uri,
+            Id: true,
+            callback: function() {
+              that.on(uri, subscription, callback);
+            }
+          });
+        }
       });
     }
-    that.subscriptions[uri][subscription] = subscription;
   };
   that.off = function(uri, subscription) {
     delete(that.subscriptions[uri][subscription]);
