@@ -63,6 +63,11 @@ func NewServer() *Server {
 	}
 }
 
+func (self *Server) Logger(l *log.Logger) *Server {
+	self.logger = l
+	return self
+}
+
 func (self *Server) Authorizer(f Authorizer) *Server {
 	self.authorizer = f
 	return self
