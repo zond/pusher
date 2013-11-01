@@ -66,6 +66,11 @@ func NewServer() *Server {
 	}
 }
 
+func (self *Server) Loglevel(i int) *Server {
+	self.loglevel = i
+	return self
+}
+
 func (self *Server) Logger(l *log.Logger) *Server {
 	self.logger = l
 	return self
