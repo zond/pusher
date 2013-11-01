@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -114,7 +115,7 @@ func (self *Server) addSubscription(sess *Session, uri string) {
 	}
 	self.subscribers[sess.id][uri] = true
 
-	self.Infof("%v\t[ws]\t%v\t%v\t%v\t[subscribe]", time.Now(), uri, sess.RemoteAddr, sess.id)
+	self.Infof("%v\t-\t%v\t%v\t%v\t[subscribe]", time.Now(), uri, sess.RemoteAddr, sess.id)
 }
 
 func (self *Server) Emit(message Message) {
@@ -144,7 +145,7 @@ func (self *Server) removeSubscription(id, uri string, withLocking bool) {
 	if len(self.subscribers[id]) == 0 {
 		delete(self.subscribers, id)
 	}
-	self.Infof("%v\t[ws]\t%v\t%v\t-\t[unsubscribe]", time.Now(), uri, id)
+	self.Infof("%v\t-\t%v\t%v\t-\t[unsubscribe]", time.Now(), uri, id)
 }
 
 func (self *Server) randomId() string {
@@ -164,10 +165,10 @@ func (self *Server) removeSession(id string) {
 	for uri, _ := range self.subscribers[id] {
 		self.removeSubscription(id, uri, false)
 	}
-	self.Infof("%v\t[ws]\t[cleanup]\t%v", time.Now(), id)
+	self.Infof("%v\t-\t[cleanup]\t%v", time.Now(), id)
 }
 
-func (self *Server) getSession(id string) (result *Session) {
+func (self *Server) GetSession(id string) (result *Session) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -188,7 +189,7 @@ func (self *Server) getSession(id string) (result *Session) {
 
 func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	self.Infof("%v\t%v\t%v\t%v", time.Now(), r.Method, r.URL, r.RemoteAddr)
-	websocket.Handler(self.getSession(r.URL.Query().Get("session_id")).handle).ServeHTTP(w, r)
+	websocket.Handler(self.GetSession(r.URL.Query().Get("session_id")).handleWS).ServeHTTP(w, r)
 }
 
 type MessageType string
@@ -234,7 +235,7 @@ type Message struct {
 }
 
 type Session struct {
-	ws             *websocket.Conn
+	ws             io.ReadWriteCloser
 	id             string
 	RemoteAddr     string
 	input          chan Message
@@ -394,7 +395,7 @@ func (self *Session) handleMessage(message Message) {
 		self.lock.Lock()
 		defer self.lock.Unlock()
 		self.authorizations[message.URI] = (self.authorizations[message.URI] || message.Write)
-		self.server.Infof("%v\t[ws]\t[authorize]\t%v\t%v\t%v", time.Now(), self.RemoteAddr, self.id, message.URI)
+		self.server.Infof("%v\t-\t[authorize]\t%v\t%v\t%v", time.Now(), self.RemoteAddr, self.id, message.URI)
 	default:
 		self.send(Message{
 			Type: TypeError,
@@ -427,18 +428,22 @@ func (self *Session) terminate() {
 	default:
 		close(self.closing)
 	}
-	self.server.Infof("%v\t[ws]\t[disconnect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
+	self.server.Infof("%v\t-\t[disconnect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
 	self.cleanupTimer.Stop()
 	self.cleanupTimer = time.AfterFunc(self.server.sessionTimeout, self.remove)
 }
 
-func (self *Session) handle(ws *websocket.Conn) {
-	self.server.Infof("%v\t[ws]\t[connect]\t%v\t%v", time.Now(), ws.Request().RemoteAddr, self.id)
+func (self *Session) handleWS(ws *websocket.Conn) {
+	self.RemoteAddr = ws.Request().RemoteAddr
+	self.Handle(ws)
+}
+
+func (self *Session) Handle(ws io.ReadWriteCloser) {
+	self.server.Infof("%v\t-\t[connect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
 
 	defer self.terminate()
 
 	self.ws = ws
-	self.RemoteAddr = self.ws.Request().RemoteAddr
 	self.cleanupTimer.Stop()
 	self.input = make(chan Message)
 	self.closing = make(chan struct{})
