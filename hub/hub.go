@@ -60,9 +60,6 @@ func NewServer() *Server {
 		subscribers:    map[string]map[string]bool{},
 		lock:           &sync.RWMutex{},
 		logger:         log.New(os.Stdout, "pusher: ", 0),
-		authorizer: func(uri, token string, write bool) (bool, error) {
-			return true, nil
-		},
 	}
 }
 
@@ -315,6 +312,9 @@ func (self *Session) heartbeatLoop() {
 }
 
 func (self *Session) authorized(uri string, wantWrite bool) bool {
+	if self.server.authorizer == nil {
+		return true
+	}
 	self.lock.RLock()
 	defer self.lock.RUnlock()
 	hasWrite, found := self.authorizations[uri]
@@ -370,28 +370,30 @@ func (self *Session) handleMessage(message Message) {
 		}
 		self.server.addSubscription(self, message.URI)
 	case TypeAuthorize:
-		ok, err := self.server.authorizer(message.URI, message.Token, message.Write)
-		if err != nil {
-			self.send(Message{
-				Type: TypeError,
-				Id:   message.Id,
-				Error: &Error{
-					Message: err.Error(),
-					Type:    TypeAuthorizationError,
-				}, Data: message,
-			})
-			return
-		}
-		if !ok {
-			self.send(Message{
-				Type: TypeError,
-				Id:   message.Id,
-				Error: &Error{
-					Message: fmt.Sprintf("%v does not provide authorization for %v", message.Token, message.URI),
-					Type:    TypeAuthorizationError,
-				}, Data: message,
-			})
-			return
+		if self.server.authorizer != nil {
+			ok, err := self.server.authorizer(message.URI, message.Token, message.Write)
+			if err != nil {
+				self.send(Message{
+					Type: TypeError,
+					Id:   message.Id,
+					Error: &Error{
+						Message: err.Error(),
+						Type:    TypeAuthorizationError,
+					}, Data: message,
+				})
+				return
+			}
+			if !ok {
+				self.send(Message{
+					Type: TypeError,
+					Id:   message.Id,
+					Error: &Error{
+						Message: fmt.Sprintf("%v does not provide authorization for %v", message.Token, message.URI),
+						Type:    TypeAuthorizationError,
+					}, Data: message,
+				})
+				return
+			}
 		}
 		self.lock.Lock()
 		defer self.lock.Unlock()
