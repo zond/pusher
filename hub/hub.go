@@ -19,6 +19,7 @@ const (
 	defaultSessionTimeout = time.Second * 30
 	idLength              = 16
 	bufLength             = 4096
+	defaultLoglevel       = 1
 )
 
 func init() {
@@ -42,6 +43,7 @@ type Server struct {
 	subscriptions  map[string]map[string]*Session
 	subscribers    map[string]map[string]bool
 	lock           *sync.RWMutex
+	loglevel       int
 	bufferSize     int
 	logger         *log.Logger
 	authorizer     Authorizer
@@ -52,6 +54,7 @@ func NewServer() *Server {
 		heartbeat:      defaultHeartbeat,
 		bufferSize:     defaultBufferSize,
 		sessionTimeout: defaultSessionTimeout,
+		loglevel:       defaultLoglevel,
 		sessions:       map[string]*Session{},
 		subscriptions:  map[string]map[string]*Session{},
 		subscribers:    map[string]map[string]bool{},
@@ -66,6 +69,28 @@ func NewServer() *Server {
 func (self *Server) Logger(l *log.Logger) *Server {
 	self.logger = l
 	return self
+}
+
+func (self *Server) Fatalf(fmt string, i ...interface{}) {
+	self.logger.Printf(fmt, i...)
+}
+
+func (self *Server) Errorf(fmt string, i ...interface{}) {
+	if self.loglevel > 0 {
+		self.logger.Printf(fmt, i...)
+	}
+}
+
+func (self *Server) Infof(fmt string, i ...interface{}) {
+	if self.loglevel > 1 {
+		self.logger.Printf(fmt, i...)
+	}
+}
+
+func (self *Server) Debugf(fmt string, i ...interface{}) {
+	if self.loglevel > 2 {
+		self.logger.Printf(fmt, i...)
+	}
 }
 
 func (self *Server) Authorizer(f Authorizer) *Server {
@@ -87,16 +112,19 @@ func (self *Server) addSubscription(sess *Session, uri string) {
 	}
 	self.subscribers[sess.id][uri] = true
 
-	self.logger.Printf("%v\t[ws]\t%v\t%v\t%v\t[subscribe]", time.Now(), uri, sess.RemoteAddr, sess.id)
+	self.Infof("%v\t[ws]\t%v\t%v\t%v\t[subscribe]", time.Now(), uri, sess.RemoteAddr, sess.id)
 }
 
 func (self *Server) Emit(message Message) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
+	sent := 0
 	for _, sess := range self.subscriptions[message.URI] {
 		sess.send(message)
+		sent++
 	}
+	self.Debugf("%v\t%v\t[emitted] x %v", time.Now(), message.URI, sent)
 }
 
 func (self *Server) removeSubscription(id, uri string, withLocking bool) {
@@ -114,7 +142,7 @@ func (self *Server) removeSubscription(id, uri string, withLocking bool) {
 	if len(self.subscribers[id]) == 0 {
 		delete(self.subscribers, id)
 	}
-	self.logger.Printf("%v\t[ws]\t%v\t%v\t-\t[unsubscribe]", time.Now(), uri, id)
+	self.Infof("%v\t[ws]\t%v\t%v\t-\t[unsubscribe]", time.Now(), uri, id)
 }
 
 func (self *Server) randomId() string {
@@ -134,7 +162,7 @@ func (self *Server) removeSession(id string) {
 	for uri, _ := range self.subscribers[id] {
 		self.removeSubscription(id, uri, false)
 	}
-	self.logger.Printf("%v\t[ws]\t[cleanup]\t%v", time.Now(), id)
+	self.Infof("%v\t[ws]\t[cleanup]\t%v", time.Now(), id)
 }
 
 func (self *Server) getSession(id string) (result *Session) {
@@ -157,7 +185,7 @@ func (self *Server) getSession(id string) (result *Session) {
 }
 
 func (self *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	self.logger.Printf("%v\t%v\t%v\t%v", time.Now(), r.Method, r.URL, r.RemoteAddr)
+	self.Infof("%v\t%v\t%v\t%v", time.Now(), r.Method, r.URL, r.RemoteAddr)
 	websocket.Handler(self.getSession(r.URL.Query().Get("session_id")).handle).ServeHTTP(w, r)
 }
 
@@ -228,6 +256,7 @@ func (self *Session) readLoop() {
 	for err == nil {
 		if message, err := self.parseMessage(buf[:n]); err == nil {
 			self.input <- message
+			self.server.Debugf("%v\t%v\t%v\t%v\t[received from socket]", time.Now(), message.URI, self.RemoteAddr, self.id)
 		} else {
 			self.send(Message{
 				Type: TypeError,
@@ -252,16 +281,17 @@ func (self *Session) writeLoop() {
 		case message = <-self.output:
 			if encoded, err = json.Marshal(message); err == nil {
 				if n, err = self.ws.Write(encoded); err != nil {
-					self.server.logger.Printf("Error sending %s on %+v: %v", encoded, self.ws, err)
+					self.server.Fatalf("Error sending %s on %+v: %v", encoded, self.ws, err)
 					return
 				} else if n != len(encoded) {
-					self.server.logger.Printf("Unable to send all of %s on %+v: only sent %v bytes", encoded, self.ws, n)
+					self.server.Fatalf("Unable to send all of %s on %+v: only sent %v bytes", encoded, self.ws, n)
 					return
 				}
 			} else {
-				self.server.logger.Printf("Unable to JSON marshal %+v: %v", message, err)
+				self.server.Fatalf("Unable to JSON marshal %+v: %v", message, err)
 				return
 			}
+			self.server.Debugf("%v\t%v\t%v\t%v\t[sent to socket]", time.Now(), message.URI, self.RemoteAddr, self.id)
 		case <-self.closing:
 			return
 		}
@@ -297,7 +327,7 @@ func (self *Session) pushOutput(message Message) {
 	select {
 	case self.output <- message:
 	default:
-		self.server.logger.Printf("Unable to send %+v to %+v, output buffer full", message, self)
+		self.server.Errorf("Unable to send %+v to %+v, output buffer full", message, self)
 	}
 }
 
@@ -361,7 +391,7 @@ func (self *Session) handleMessage(message Message) {
 		self.lock.Lock()
 		defer self.lock.Unlock()
 		self.authorizations[message.URI] = (self.authorizations[message.URI] || message.Write)
-		self.server.logger.Printf("%v\t[ws]\t[authorize]\t%v\t%v\t%v", time.Now(), self.RemoteAddr, self.id, message.URI)
+		self.server.Infof("%v\t[ws]\t[authorize]\t%v\t%v\t%v", time.Now(), self.RemoteAddr, self.id, message.URI)
 	default:
 		self.send(Message{
 			Type: TypeError,
@@ -394,13 +424,13 @@ func (self *Session) terminate() {
 	default:
 		close(self.closing)
 	}
-	self.server.logger.Printf("%v\t[ws]\t[disconnect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
+	self.server.Infof("%v\t[ws]\t[disconnect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
 	self.cleanupTimer.Stop()
 	self.cleanupTimer = time.AfterFunc(self.server.sessionTimeout, self.remove)
 }
 
 func (self *Session) handle(ws *websocket.Conn) {
-	self.server.logger.Printf("%v\t[ws]\t[connect]\t%v\t%v", time.Now(), ws.Request().RemoteAddr, self.id)
+	self.server.Infof("%v\t[ws]\t[connect]\t%v\t%v", time.Now(), ws.Request().RemoteAddr, self.id)
 
 	defer self.terminate()
 
