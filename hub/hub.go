@@ -325,10 +325,6 @@ func (self *Session) authorized(uri string, wantWrite bool) bool {
 }
 
 func (self *Session) send(message Message) {
-	self.pushOutput(message)
-}
-
-func (self *Session) pushOutput(message Message) {
 	select {
 	case self.output <- message:
 	default:
