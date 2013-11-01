@@ -7,6 +7,9 @@
   $(function() {
 
     var pusher = new Pusher({url: "ws://localhost:2222"});
+    pusher.authorizer = function(uri, write) {
+      return "Yv-lAwEBC0FjY2Vzc1Rva2VuAf-mAAEGAQdBY2NvdW50AQwAAQhMb2NhdGlvbgEMAAEFU2NvcGUBDAABCVRva2VuVHlwZQEMAAEJRXhwaXJlc0F0Af-KAAEESGFzaAEKAAAAEP-JBQEBBFRpbWUB_4oAAAD_sv-mAUthZzl6Zm1KcGVpMWpiM0psTFdGMWRHaHlKUXNTQkZKdmIzUWlCMEZqWTI5MWJuUU1DeElIUVdOamIzVnVkQmlBZ0lDQXNMeXJDUXcCBWJhc2ljAQZiZWFyZXIBDwEAAAAOygW2SxMmfVcAAAFAjBuE-FgklU76RgVw4jGZPEiBGLLehPZXK2wzvTaHf1c0ux0tc2xyO-i-oADueRXUO-ewCWha3kQFipxapoUo5wA=";
+    };
 
     pusher.onconnect = function(msg) {
       $("#r").prepend("<p><h2>CONNECT</h2>" + JSON.stringify(msg, "", 2) +"</p>");
@@ -17,7 +20,7 @@
     }
 
 
-    pusher.on("/foo", function(type, text) {
+    pusher.on("/account/ag9zfmJpei1jb3JlLWF1dGhyJQsSBFJvb3QiB0FjY291bnQMCxIHQWNjb3VudBiAgICAsLyrCQw/basic/basic/player", function(type, text) {
       $("#r").prepend("<p><h2>" + type + "</h2>" + text +"</p>");
     }, function(x) {
       $("#r").prepend("<p><h2>Subscribed on</h2>" + x +"</p>");
