@@ -257,12 +257,12 @@ func (self *Session) readLoop() {
 	buf := make([]byte, bufLength)
 	n, err := self.ws.Read(buf)
 	for err == nil {
-		buf_copy := make([]byte, n)
-		copy(buf_copy, buf[:n])
-		if message, err := self.parseMessage(buf_copy); err == nil {
+		if message, err := self.parseMessage(buf[:n]); err == nil {
 			self.input <- message
 			self.server.Debugf("%v\t%v\t%v\t%v\t[received from socket]", time.Now(), message.URI, self.RemoteAddr, self.id)
 		} else {
+			buf_copy := make([]byte, n)
+			copy(buf_copy, buf[:n])
 			self.send(Message{
 				Type: TypeError,
 				Error: &Error{
