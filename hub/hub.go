@@ -438,6 +438,10 @@ func (self *Session) handleWS(ws *websocket.Conn) {
 	self.Handle(ws)
 }
 
+/*
+ * This function will work as the session main-loop listening on events
+ * on a websocket or other source that interfaces io.ReadWriteCloser.
+ */
 func (self *Session) Handle(ws io.ReadWriteCloser) {
 	self.server.Infof("%v\t-\t[connect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
 
@@ -460,6 +464,7 @@ func (self *Session) Handle(ws io.ReadWriteCloser) {
 			Id:             self.id,
 		},
 	})
+
 	var message Message
 	for {
 		select {
