@@ -257,7 +257,9 @@ func (self *Session) readLoop() {
 	buf := make([]byte, bufLength)
 	n, err := self.ws.Read(buf)
 	for err == nil {
-		if message, err := self.parseMessage(buf[:n]); err == nil {
+		buf_copy := make([]byte, n)
+		copy(buf_copy, buf[:n])
+		if message, err := self.parseMessage(buf_copy); err == nil {
 			self.input <- message
 			self.server.Debugf("%v\t%v\t%v\t%v\t[received from socket]", time.Now(), message.URI, self.RemoteAddr, self.id)
 		} else {
@@ -267,7 +269,7 @@ func (self *Session) readLoop() {
 					Message: err.Error(),
 					Type:    TypeJSONError,
 				},
-				Data: string(buf[:n])})
+				Data: string(buf_copy)})
 		}
 		n, err = self.ws.Read(buf)
 	}
