@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/zond/pusher/hub"
 	"net/http"
+	"runtime"
 )
 
 func main() {
@@ -12,5 +13,7 @@ func main() {
 	flag.Parse()
 	addr := fmt.Sprintf("0.0.0.0:%d", *port)
 	fmt.Println("Listening on", addr)
+	runtime.GOMAXPROCS(runtime.NumCPU())
+	fmt.Printf("Processes: %d\n", runtime.GOMAXPROCS(-1))
 	http.ListenAndServe(addr, hub.NewServer())
 }
