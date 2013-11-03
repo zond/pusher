@@ -119,8 +119,8 @@ func (self *Server) addSubscription(sess *Session, uri string) {
 }
 
 func (self *Server) Emit(message Message) {
-	self.lock.Lock()
-	defer self.lock.Unlock()
+	self.lock.RLock()
+	defer self.lock.RUnlock()
 
 	sent := 0
 	for _, sess := range self.subscriptions[message.URI] {
