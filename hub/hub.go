@@ -261,15 +261,14 @@ func (self *Session) readLoop() {
 			self.input <- message
 			self.server.Debugf("%v\t%v\t%v\t%v\t[received from socket]", time.Now(), message.URI, self.RemoteAddr, self.id)
 		} else {
-			buf_copy := make([]byte, n)
-			copy(buf_copy, buf[:n])
 			self.send(Message{
 				Type: TypeError,
 				Error: &Error{
 					Message: err.Error(),
 					Type:    TypeJSONError,
 				},
-				Data: string(buf_copy)})
+				Data: string(buf[:n]),
+			})
 		}
 		n, err = self.ws.Read(buf)
 	}
