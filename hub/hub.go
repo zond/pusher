@@ -430,6 +430,8 @@ func (self *Session) terminate() {
 		close(self.closing)
 	}
 	self.server.Infof("%v\t-\t[disconnect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
+	self.lock.Lock()
+	defer self.lock.Unlock()
 	self.cleanupTimer.Stop()
 	self.cleanupTimer = time.AfterFunc(self.server.sessionTimeout, self.remove)
 }
