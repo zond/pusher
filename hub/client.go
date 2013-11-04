@@ -19,10 +19,10 @@ func StartServer() (net.Listener, *Server) {
 	return l, hub
 }
 
-type IncommingMessage <-chan Message
+type IncomingMessage <-chan Message
 type OutgoingMessage chan<- Message
 
-func (in IncommingMessage) Next(msg_type MessageType) Message {
+func (in IncomingMessage) Next(msg_type MessageType) Message {
 	for {
 		select {
 		case m, ok := <-in:
@@ -44,7 +44,7 @@ type pipe struct {
 	recive chan Message
 }
 
-func (hub *Server) InternalPipe(session_id string) (*Session, OutgoingMessage, IncommingMessage) {
+func (hub *Server) InternalPipe(session_id string) (*Session, OutgoingMessage, IncomingMessage) {
 	session := hub.GetSession(session_id)
 	p := &pipe{
 		send:   make(chan Message),
@@ -77,7 +77,7 @@ func (self *pipe) Close() error {
 	return nil
 }
 
-func Connect(session_id string) (OutgoingMessage, IncommingMessage) {
+func Connect(session_id string) (OutgoingMessage, IncomingMessage) {
 	input := make(chan Message)
 	output := make(chan Message)
 	ws := socknet.Socknet{}
