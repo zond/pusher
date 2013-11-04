@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -176,6 +177,7 @@ func (self *Server) GetSession(id string) (result *Session) {
 	if result = self.sessions[id]; result == nil {
 		result = &Session{
 			output:         make(chan Message, self.bufferSize),
+			input:          make(chan Message),
 			id:             self.randomId(),
 			server:         self,
 			authorizations: map[string]bool{},
@@ -235,13 +237,12 @@ type Message struct {
 }
 
 type Session struct {
-	ws             io.ReadWriteCloser
 	id             string
 	RemoteAddr     string
 	input          chan Message
 	output         chan Message
-	closing        chan struct{}
 	server         *Server
+	connections    int32
 	cleanupTimer   *time.Timer
 	authorizations map[string]bool
 	lock           *sync.RWMutex
@@ -252,10 +253,10 @@ func (self *Session) parseMessage(b []byte) (result Message, err error) {
 	return
 }
 
-func (self *Session) readLoop() {
-	defer self.terminate()
+func (self *Session) readLoop(closing chan struct{}, ws io.ReadWriteCloser) {
+	defer self.terminate(closing, ws)
 	buf := make([]byte, bufLength)
-	n, err := self.ws.Read(buf)
+	n, err := ws.Read(buf)
 	for err == nil {
 		if message, err := self.parseMessage(buf[:n]); err == nil {
 			self.input <- message
@@ -270,12 +271,12 @@ func (self *Session) readLoop() {
 				Data: string(buf[:n]),
 			})
 		}
-		n, err = self.ws.Read(buf)
+		n, err = ws.Read(buf)
 	}
 }
 
-func (self *Session) writeLoop() {
-	defer self.terminate()
+func (self *Session) writeLoop(closing chan struct{}, ws io.ReadWriteCloser) {
+	defer self.terminate(closing, ws)
 	var message Message
 	var err error
 	var n int
@@ -284,11 +285,11 @@ func (self *Session) writeLoop() {
 		select {
 		case message = <-self.output:
 			if encoded, err = json.Marshal(message); err == nil {
-				if n, err = self.ws.Write(encoded); err != nil {
-					self.server.Fatalf("Error sending %s on %+v: %v", encoded, self.ws, err)
+				if n, err = ws.Write(encoded); err != nil {
+					self.server.Fatalf("Error sending %s on %+v: %v", encoded, ws, err)
 					return
 				} else if n != len(encoded) {
-					self.server.Fatalf("Unable to send all of %s on %+v: only sent %v bytes", encoded, self.ws, n)
+					self.server.Fatalf("Unable to send all of %s on %+v: only sent %v bytes", encoded, ws, n)
 					return
 				}
 			} else {
@@ -296,16 +297,16 @@ func (self *Session) writeLoop() {
 				return
 			}
 			self.server.Debugf("%v\t%v\t%v\t%v\t[sent to socket]", time.Now(), message.URI, self.RemoteAddr, self.id)
-		case <-self.closing:
+		case <-closing:
 			return
 		}
 	}
 }
 
-func (self *Session) heartbeatLoop() {
+func (self *Session) heartbeatLoop(closing chan struct{}) {
 	for {
 		select {
-		case <-self.closing:
+		case <-closing:
 			return
 		case <-time.After(self.server.heartbeat / 2):
 			self.send(Message{Type: TypeHeartbeat})
@@ -422,18 +423,23 @@ func (self *Session) remove() {
 	self.server.removeSession(self.id)
 }
 
-func (self *Session) terminate() {
-	self.ws.Close()
-	select {
-	case _ = <-self.closing:
-	default:
-		close(self.closing)
-	}
-	self.server.Infof("%v\t-\t[disconnect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
+func (self *Session) terminate(closing chan struct{}, ws io.ReadWriteCloser) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
+
+	select {
+	case _ = <-closing:
+	default:
+		close(closing)
+	}
+
+	self.server.Infof("%v\t-\t[disconnect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
+
+	ws.Close()
 	self.cleanupTimer.Stop()
-	self.cleanupTimer = time.AfterFunc(self.server.sessionTimeout, self.remove)
+	if atomic.AddInt32(&self.connections, -1) == 0 {
+		self.cleanupTimer = time.AfterFunc(self.server.sessionTimeout, self.remove)
+	}
 }
 
 func (self *Session) handleWS(ws *websocket.Conn) {
@@ -442,22 +448,21 @@ func (self *Session) handleWS(ws *websocket.Conn) {
 }
 
 /*
- * This function will work as the session main-loop listening on events
- * on a websocket or other source that interfaces io.ReadWriteCloser.
+ * Handle works as the session main-loop listening on events
+ * on a websocket or other source that implements io.ReadWriteCloser.
  */
 func (self *Session) Handle(ws io.ReadWriteCloser) {
 	self.server.Infof("%v\t-\t[connect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
 
-	defer self.terminate()
+	closing := make(chan struct{})
+	defer self.terminate(closing, ws)
+	atomic.AddInt32(&self.connections, 1)
 
-	self.ws = ws
 	self.cleanupTimer.Stop()
-	self.input = make(chan Message)
-	self.closing = make(chan struct{})
 
-	go self.readLoop()
-	go self.writeLoop()
-	go self.heartbeatLoop()
+	go self.readLoop(closing, ws)
+	go self.writeLoop(closing, ws)
+	go self.heartbeatLoop(closing)
 
 	self.send(Message{
 		Type: TypeWelcome,
@@ -471,7 +476,7 @@ func (self *Session) Handle(ws io.ReadWriteCloser) {
 	var message Message
 	for {
 		select {
-		case _ = <-self.closing:
+		case _ = <-closing:
 			return
 		case message = <-self.input:
 			self.handleMessage(message)
