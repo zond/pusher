@@ -1,0 +1,11 @@
+language: go
+
+go:
+  - 1.1
+
+install:
+    - go get github.com/lindroth/socknet/lib
+    - go get github.com/stretchr/testify/assert
+
+script: cd hub; go test
+
