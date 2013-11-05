@@ -76,24 +76,24 @@ func (self *Server) Logger(l *log.Logger) *Server {
 }
 
 func (self *Server) Fatalf(fmt string, i ...interface{}) {
-	self.logger.Printf(fmt, i...)
+	self.logger.Printf("FATAL: "+fmt, i...)
 }
 
 func (self *Server) Errorf(fmt string, i ...interface{}) {
 	if self.loglevel > 0 {
-		self.logger.Printf(fmt, i...)
+		self.logger.Printf("ERROR: "+fmt, i...)
 	}
 }
 
 func (self *Server) Infof(fmt string, i ...interface{}) {
 	if self.loglevel > 1 {
-		self.logger.Printf(fmt, i...)
+		self.logger.Printf("INFO: "+fmt, i...)
 	}
 }
 
 func (self *Server) Debugf(fmt string, i ...interface{}) {
 	if self.loglevel > 2 {
-		self.logger.Printf(fmt, i...)
+		self.logger.Printf("DEBUG: "+fmt, i...)
 	}
 }
 
@@ -260,7 +260,7 @@ func (self *Session) readLoop(closing chan struct{}, ws io.ReadWriteCloser) {
 	for err == nil {
 		if message, err := self.parseMessage(buf[:n]); err == nil {
 			self.input <- message
-			self.server.Debugf("%v\t%v\t%v\t%v\t[received from socket]", time.Now(), message.URI, self.RemoteAddr, self.id)
+			self.server.Debugf("%v\t%v\t%v\t%v\t%v\t[received from socket]", time.Now(), message.Type, message.URI, self.RemoteAddr, self.id)
 		} else {
 			self.send(Message{
 				Type: TypeError,
@@ -296,7 +296,7 @@ func (self *Session) writeLoop(closing chan struct{}, ws io.ReadWriteCloser) {
 				self.server.Fatalf("Unable to JSON marshal %+v: %v", message, err)
 				return
 			}
-			self.server.Debugf("%v\t%v\t%v\t%v\t[sent to socket]", time.Now(), message.URI, self.RemoteAddr, self.id)
+			self.server.Debugf("%v\t%v\t%v\t%v\t%v\t[sent to socket]", time.Now(), message.Type, message.URI, self.RemoteAddr, self.id)
 		case <-closing:
 			return
 		}
@@ -340,6 +340,7 @@ func (self *Session) handleMessage(message Message) {
 	case TypeHeartbeat:
 	case TypeMessage:
 		if !self.authorized(message.URI, true) {
+			self.server.Debugf("%v\t%v\t%v\t[unauthorized emit]", time.Now(), message.URI, self.RemoteAddr)
 			self.send(Message{
 				Type: TypeError,
 				Id:   message.Id,
@@ -356,6 +357,7 @@ func (self *Session) handleMessage(message Message) {
 		self.server.removeSubscription(self.id, message.URI, true)
 	case TypeSubscribe:
 		if !self.authorized(message.URI, false) {
+			self.server.Debugf("%v\t%v\t%v\t[unauthorized subscribe]", time.Now(), message.URI, self.RemoteAddr)
 			self.send(Message{
 				Type: TypeError,
 				Id:   message.Id,
