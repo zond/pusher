@@ -2,13 +2,14 @@ package js
 
 import (
 	"bytes"
-	"fmt"
 	socknet "github.com/lindroth/socknet/lib"
 	"github.com/robertkrimen/otto"
 	"github.com/zond/pusher/hub"
 	"io"
 	"net/http"
 	"os"
+	"runtime/debug"
+	"strings"
 	"testing"
 	"time"
 )
@@ -59,7 +60,7 @@ func (self *ottoSocket) connect(url string) {
 		}
 		return
 	}
-	must(self.obj.Set("readystate", 1))
+	must(self.obj.Set("readyState", 1))
 	go self.listen()
 	must2(self.obj.Call("onopen"))
 }
@@ -76,7 +77,7 @@ func newOttoSocket(call otto.FunctionCall) (result otto.Value) {
 		socket: &socknet.Socknet{},
 		obj:    resultObj,
 	}
-	must(resultObj.Set("readystate", 0))
+	must(resultObj.Set("readyState", 0))
 	must(resultObj.Set("onerror", func(call otto.FunctionCall) (result otto.Value) {
 		return
 	}))
@@ -90,27 +91,18 @@ func newOttoSocket(call otto.FunctionCall) (result otto.Value) {
 		return
 	}))
 	must(resultObj.Set("close", func(call otto.FunctionCall) (result otto.Value) {
-		resultObj.Set("readystate", 2)
+		resultObj.Set("readyState", 2)
 		close(socket.input)
-		resultObj.Set("readystate", 3)
+		resultObj.Set("readyState", 3)
+		return
+	}))
+	must(resultObj.Set("send", func(call otto.FunctionCall) (result otto.Value) {
+		socket.input <- call.ArgumentList[0].String()
 		return
 	}))
 	go socket.connect(call.ArgumentList[0].String())
 
 	return result
-}
-
-func parseJSON(call otto.FunctionCall) otto.Value {
-	obj, err := call.Otto.Run("(" + call.ArgumentList[0].String() + ")")
-	if err != nil {
-		panic(err)
-	}
-	return obj
-}
-
-func encodeJSON(call otto.FunctionCall) otto.Value {
-	fmt.Println(call.ArgumentList[0])
-	return otto.Value{}
 }
 
 func setTimeout(call otto.FunctionCall) (result otto.Value) {
@@ -182,15 +174,18 @@ func clearInterval(call otto.FunctionCall) (result otto.Value) {
 	return
 }
 
-func ottoJSON(o *otto.Otto) otto.Value {
-	result, err := o.Run("new Object()")
+func loadFile(o *otto.Otto, s string) {
+	f, err := os.Open(s)
 	if err != nil {
 		panic(err)
 	}
-	resultObj := result.Object()
-	must(resultObj.Set("parse", parseJSON))
-	must(resultObj.Set("stringify", encodeJSON))
-	return result
+	buf := &bytes.Buffer{}
+	must2(io.Copy(buf, f))
+	err = f.Close()
+	if err != nil {
+		panic(err)
+	}
+	must2(o.Run(string(buf.Bytes())))
 }
 
 func newOtto() *otto.Otto {
@@ -206,12 +201,12 @@ func newOtto() *otto.Otto {
 	}
 	o := otto.New()
 	o.Set("WebSocket", newOttoSocket)
-	o.Set("JSON", ottoJSON(o))
 	o.Set("setInterval", setInterval)
 	o.Set("clearInterval", clearInterval)
 	o.Set("setTimeout", setTimeout)
 	o.Set("clearTimeout", clearTimeout)
-	must2(o.Run(string(buf.Bytes())))
+	loadFile(o, "pusher.js")
+	loadFile(o, "json2.js")
 	return o
 }
 
@@ -222,10 +217,24 @@ func assertWithin(t *testing.T, f func() bool, d time.Duration) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("Expected %v to be true within %d", f, d)
+			t.Fatalf("Expected %v to be true within %d", strings.Split(string(debug.Stack()), "\n")[2], d)
 		}
 		time.Sleep(time.Second / 5)
 	}
+}
+
+func assertAuthorized(t *testing.T, o *otto.Otto) {
+	assertWithin(t, func() bool {
+		val, err := o.Run("authorized")
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
+		authorized, err := val.ToBoolean()
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
+		return authorized
+	}, time.Second*2)
 }
 
 func assertConnected(t *testing.T, o *otto.Otto) {
@@ -243,23 +252,18 @@ func assertConnected(t *testing.T, o *otto.Otto) {
 }
 
 func connect(t *testing.T, o *otto.Otto) {
-	code := `
-	var connected = false; 
-	var pusher = new Pusher({
-		url: 'ws://localhost:2222/',
-		onconnect: function() {
-			connected = true;
-		}
-	});
-`
-	must2(o.Run(code))
+	must2(o.Run("var connected = false; var pusher = new Pusher({ url: 'ws://localhost:2222/', onconnect: function() { connected = true;	} });"))
 	assertConnected(t, o)
 
 }
 
 func init() {
 	go func() {
-		http.ListenAndServe("0.0.0.0:2222", hub.NewServer())
+		hub := hub.NewServer()
+		hub.Authorizer(func(uri, token string, write bool) (bool, error) {
+			return true, nil
+		})
+		http.ListenAndServe("0.0.0.0:2222", hub)
 	}()
 }
 
@@ -274,4 +278,12 @@ func TestReconnect(t *testing.T) {
 	must2(o.Run("connected = false;"))
 	must2(o.Run("pusher.close();"))
 	assertConnected(t, o)
+}
+
+func TestAutoAuthorizeForEmit(t *testing.T) {
+	o := newOtto()
+	connect(t, o)
+	must2(o.Run("var authorized = false; pusher.authorizer = function(uri, write) { authorized = true; return ''; };"))
+	must2(o.Run("pusher.emit('foo', 'brap, brop');"))
+	assertAuthorized(t, o)
 }

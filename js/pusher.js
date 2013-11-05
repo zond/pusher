@@ -138,7 +138,7 @@ function Pusher(options) {
   that.emit = function(uri) {
     // Copy arguments, becouse slice changes it.
     var args = null;
-    var callback = null;
+    var callback = function() {};
     if (typeof (arguments[arguments.length-1]) === "function") {
       args = Array.prototype.slice.call(arguments, 0, arguments.length - 1);
       callback = arguments[arguments.length - 1];
@@ -181,7 +181,6 @@ function Pusher(options) {
         URI: uri,
         Id: true,
         callback: function() {
-          console.log("subscribed to", uri);
           if (that.subscriptions[uri] == null) {
             that.subscriptions[uri] = {};
           }
