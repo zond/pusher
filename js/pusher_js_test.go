@@ -223,37 +223,23 @@ func assertWithin(t *testing.T, f func() bool, d time.Duration) {
 	}
 }
 
-func assertAuthorized(t *testing.T, o *otto.Otto) {
+func assertJS(t *testing.T, o *otto.Otto, s string) {
 	assertWithin(t, func() bool {
-		val, err := o.Run("authorized")
+		val, err := o.Run(s)
 		if err != nil {
 			t.Fatalf("%v", err)
 		}
-		authorized, err := val.ToBoolean()
+		bo, err := val.ToBoolean()
 		if err != nil {
 			t.Fatalf("%v", err)
 		}
-		return authorized
-	}, time.Second*2)
-}
-
-func assertConnected(t *testing.T, o *otto.Otto) {
-	assertWithin(t, func() bool {
-		val, err := o.Run("connected")
-		if err != nil {
-			t.Fatalf("%v", err)
-		}
-		connected, err := val.ToBoolean()
-		if err != nil {
-			t.Fatalf("%v", err)
-		}
-		return connected
+		return bo
 	}, time.Second*2)
 }
 
 func connect(t *testing.T, o *otto.Otto) {
 	must2(o.Run("var connected = false; var pusher = new Pusher({ url: 'ws://localhost:2222/', onconnect: function() { connected = true;	} });"))
-	assertConnected(t, o)
+	assertJS(t, o, "connected")
 
 }
 
@@ -277,7 +263,7 @@ func TestReconnect(t *testing.T) {
 	connect(t, o)
 	must2(o.Run("connected = false;"))
 	must2(o.Run("pusher.close();"))
-	assertConnected(t, o)
+	assertJS(t, o, "connected")
 }
 
 func TestAutoAuthorizeForEmit(t *testing.T) {
@@ -285,5 +271,22 @@ func TestAutoAuthorizeForEmit(t *testing.T) {
 	connect(t, o)
 	must2(o.Run("var authorized = false; pusher.authorizer = function(uri, write) { authorized = true; return ''; };"))
 	must2(o.Run("pusher.emit('foo', 'brap, brop');"))
-	assertAuthorized(t, o)
+	assertJS(t, o, "authorized")
+}
+
+func TestAutoAuthorizeForSubscribe(t *testing.T) {
+	o := newOtto()
+	connect(t, o)
+	must2(o.Run("var authorized = false; pusher.authorizer = function(uri, write) { authorized = true; return ''; };"))
+	must2(o.Run("pusher.on('foo', function() { });"))
+	assertJS(t, o, "authorized")
+}
+
+func TestSubscribeEmit(t *testing.T) {
+	o := newOtto()
+	connect(t, o)
+	must2(o.Run("pusher.authorizer = function(uri, write) { return ''; };"))
+	must2(o.Run("var received = false; pusher.on('foo', function() { received = true; });"))
+	must2(o.Run("pusher.emit('foo', 'brap, brop');"))
+	assertJS(t, o, "received")
 }
