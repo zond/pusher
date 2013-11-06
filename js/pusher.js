@@ -117,7 +117,7 @@ var Pusher = function(options) {
         delete(that.subscriptions[msg.Data.URI]);
       }
       var obj = that.errbacks[msg.Id];
-      if (obj !== null && obj.errback) {
+      if (typeof obj !== 'undefined' && obj.errback) {
         obj.errback.call(obj, msg);
       } else {
         that.onerror(msg);
@@ -126,7 +126,7 @@ var Pusher = function(options) {
       delete(that.callbacks[msg.Id]);
     } else if (msg.Type === 'Ack') {
       var object = that.callbacks[msg.Id];
-      if (object !== null) {
+      if (typeof object !== 'undefined') {
         object.callback.call(object, msg);
       }
       delete(that.callbacks[msg.Id]);
@@ -191,7 +191,7 @@ var Pusher = function(options) {
             that.subscriptions[uri] = {};
           }
           that.subscriptions[uri][subscription] = subscription;
-          if (callback !== null) {
+          if (typeof callback !== 'undefined') {
             callback(uri);
           }
         },
@@ -254,10 +254,10 @@ var Pusher = function(options) {
     if (that.socket.readyState === 1) {
       if (obj.Id) {
         obj.Id = that.id + ':' + that.nextId++;
-        if (obj.callback !== null) {
+        if (typeof obj.callback !== 'undefined') {
           that.callbacks[obj.Id] = obj;
         }
-        if (obj.errback !== null) {
+        if (typeof obj.errback !== null) {
           that.errbacks[obj.Id] = obj;
         }
       }

@@ -205,6 +205,7 @@ func newOtto() *otto.Otto {
 	o.Set("clearInterval", clearInterval)
 	o.Set("setTimeout", setTimeout)
 	o.Set("clearTimeout", clearTimeout)
+	must2(o.Run("module = new Object();"))
 	loadFile(o, "pusher.js")
 	loadFile(o, "json2.js")
 	return o
@@ -269,7 +270,7 @@ func TestReconnect(t *testing.T) {
 func TestAutoAuthorizeForEmit(t *testing.T) {
 	o := newOtto()
 	connect(t, o)
-	must2(o.Run("var authorized = false; pusher.authorizer = function(uri, write) { authorized = true; return ''; };"))
+	must2(o.Run("var authorized = false; pusher.authorizer = function(uri, write, cb) { authorized = true; cb(''); };"))
 	must2(o.Run("pusher.emit('foo', 'brap, brop');"))
 	assertJS(t, o, "authorized")
 }
@@ -277,7 +278,7 @@ func TestAutoAuthorizeForEmit(t *testing.T) {
 func TestAutoAuthorizeForSubscribe(t *testing.T) {
 	o := newOtto()
 	connect(t, o)
-	must2(o.Run("var authorized = false; pusher.authorizer = function(uri, write) { authorized = true; return ''; };"))
+	must2(o.Run("var authorized = false; pusher.authorizer = function(uri, write, cb) { authorized = true; cb(''); };"))
 	must2(o.Run("pusher.on('foo', function() { });"))
 	assertJS(t, o, "authorized")
 }
@@ -285,7 +286,7 @@ func TestAutoAuthorizeForSubscribe(t *testing.T) {
 func TestSubscribeEmit(t *testing.T) {
 	o := newOtto()
 	connect(t, o)
-	must2(o.Run("pusher.authorizer = function(uri, write) { return ''; };"))
+	must2(o.Run("pusher.authorizer = function(uri, write, cb) { cb(''); };"))
 	must2(o.Run("var received = false; pusher.on('foo', function() { received = true; });"))
 	must2(o.Run("pusher.emit('foo', 'brap, brop');"))
 	assertJS(t, o, "received")
