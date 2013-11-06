@@ -1,4 +1,4 @@
-function Pusher(options) {
+var Pusher = function(options) {
   var that = this;
   // next message id
   that.nextId = 0;
@@ -37,16 +37,16 @@ function Pusher(options) {
     console.log('pusher connected:', msg);
   };
   // authorizer is a function that generate authorization tokens for your rights.
-  that.authorizer = options.authorizer || function(uri, write) {
+  that.authorizer = options.authorizer || function(uri, write, callback) {
     console.log('authorizer returned empty token for ', uri, write);
-    return "";
+    callback('');
   };
   /*
    * set up the socket
    */
   that.connect = function() {
     var url = that.url;
-    if (that.id != null) {
+    if (that.id !== null) {
       url += '?session_id=' + that.id;
     }
     that.socket = new WebSocket(url);
@@ -64,73 +64,77 @@ function Pusher(options) {
     that.socket.onclose = function() {
       that.close();
     };
-  }
+  };
   /*
    * handle incoming messages
    */
   that.handleMessage = function(msg) {
-    if (msg.Type == "Welcome") {
+    if (msg.Type === 'Welcome') {
       that.heartbeat = msg.Welcome.Heartbeat;
-      if (that.id != null && msg.Welcome.Id != that.id) {
+      if (that.id !== null && msg.Welcome.Id !== that.id) {
         var oldSubscriptions = that.subscriptions;
         that.subscriptions = {};
         for (var uri in oldSubscriptions) {
-          for (var i = 0; i < oldSubscriptions[uri].length; i++) {
-            that.on(uri, oldSubscriptions[uri][i]);
+          if (typeof oldSubscriptions[uri] !== 'undefined') {
+            for (var i = 0; i < oldSubscriptions[uri].length; i++) {
+              that.on(uri, oldSubscriptions[uri][i]);
+            }
           }
         }
       }
       that.id = msg.Welcome.Id;
-      if (that.heartbeater != null) {
+      if (that.heartbeater !== null) {
         clearInterval(that.heartbeater);
       }
       that.heartbeater = setInterval(function() {
         if (new Date().getTime() - that.lastHeartbeatReceived.getTime() > that.heartbeat) {
-          that.close()
+          that.close();
         } else {
-          if (that.socket.readyState == 1) {
+          if (that.socket.readyState === 1) {
             that.send({
-              Type: "Heartbeat"
+              Type: 'Heartbeat'
             });
-          } 
+          }
         }
       }, that.heartbeat / 2);
       while (that.buffer.length > 0) {
         that.send(that.buffer.shift());
       }
       that.onconnect(msg);
-    } else if (msg.Type == "Heartbeat") {
+    } else if (msg.Type === 'Heartbeat') {
       that.lastHeartbeatReceived = new Date();
-    } else if (msg.Type == "Message") {
+    } else if (msg.Type === 'Message') {
       var subscriptions = that.subscriptions[msg.URI];
-      if (subscriptions != null) {
+      if (subscriptions !== null) {
         for (var subscription in subscriptions) {
-          subscriptions[subscription].apply(msg, msg.Data);
+          if (typeof subscriptions[subscription] !== 'undefined') {
+            subscriptions[subscription].apply(msg, msg.Data);
+          }
         }
       }
-    } else if (msg.Type == "Error") {
-      if (msg.Data.Type == "Subscribe") {
+    } else if (msg.Type === 'Error') {
+      if (msg.Data.Type === 'Subscribe') {
         delete(that.subscriptions[msg.Data.URI]);
       }
       var obj = that.errbacks[msg.Id];
-      if (obj != null) {
+      if (obj !== null && obj.errback) {
         obj.errback.call(obj, msg);
       } else {
         that.onerror(msg);
       }
       delete(that.errbacks[msg.Id]);
       delete(that.callbacks[msg.Id]);
-    } else if (msg.Type == "Ack") {
-      var obj = that.callbacks[msg.Id];
-      if (obj != null) {
-        obj.callback.call(obj, msg);
+    } else if (msg.Type === 'Ack') {
+      var object = that.callbacks[msg.Id];
+      if (object !== null) {
+        object.callback.call(object, msg);
       }
       delete(that.callbacks[msg.Id]);
       delete(that.errbacks[msg.Id]);
     } else {
       that.onerror({
-        Type: "Error",
-        Error: "Unknown message type " + msg.Type,
+        Type: 'Error',
+        Error: 'Unknown message type ' + msg.Type,
         Data: msg
       });
     }
@@ -139,7 +143,7 @@ function Pusher(options) {
     // Copy arguments, becouse slice changes it.
     var args = null;
     var callback = function() {};
-    if (typeof (arguments[arguments.length-1]) === "function") {
+    if (typeof (arguments[arguments.length-1]) === 'function') {
       args = Array.prototype.slice.call(arguments, 0, arguments.length - 1);
       callback = arguments[arguments.length - 1];
     } else {
@@ -152,14 +156,16 @@ function Pusher(options) {
         Data: args.slice(1),
         Id: true,
         errback: function(err) {
-          if (err.Error.Type == "AuthorizationError") {
-            that.send({
-              Type: 'Authorize',
-              URI: uri,
-              Write: true,
-              Token: that.authorizer(uri, true),
-              Id: true,
-              callback: sendFunc
+          if (err.Error.Type === 'AuthorizationError') {
+            that.authorizer(uri, true, function(token) {
+              that.send({
+                Type: 'Authorize',
+                URI: uri,
+                Write: true,
+                Token: token,
+                Id: true,
+                callback: sendFunc
+              });
             });
           } else {
             that.onerror(err);
@@ -175,33 +181,35 @@ function Pusher(options) {
     sendFunc();
   };
   that.on = function(uri, subscription, callback) {
-    if (that.subscriptions[uri] == null) {
+    if (typeof that.subscriptions[uri] === 'undefined') {
       that.send({
         Type: 'Subscribe',
         URI: uri,
         Id: true,
         callback: function() {
-          if (that.subscriptions[uri] == null) {
+          if (typeof that.subscriptions[uri] === 'undefined') {
             that.subscriptions[uri] = {};
           }
           that.subscriptions[uri][subscription] = subscription;
-          if (callback != null) {
+          if (callback !== null) {
             callback(uri);
           }
         },
         errback: function(err) {
-          if (err.Error.Type == "AuthorizationError") {
-            that.send({
-              Type: 'Authorize',
-              URI: uri,
-              Id: true,
-              Token: that.authorizer(uri, false),
-              callback: function() {
-                that.on(uri, subscription, callback);
-              }
+          if (err.Error.Type === 'AuthorizationError') {
+            that.authorizer(uri, false, function(token) {
+              that.send({
+                Type: 'Authorize',
+                URI: uri,
+                Id: true,
+                Token: token,
+                callback: function() {
+                  that.on(uri, subscription, callback);
+                }
+              });
             });
           } else {
-            that.onerror(err)
+            that.onerror(err);
           }
         }
       });
@@ -210,10 +218,12 @@ function Pusher(options) {
   that.off = function(uri, subscription) {
     delete(that.subscriptions[uri][subscription]);
     var left = 0;
-    for (var subscription in that.subscriptions[uri]) {
-      left++;
+    for (var sub in that.subscriptions[uri]) {
+      if (that.subscriptions[uri]) {
+        left++;
+      }
     }
-    if (left == 0) {
+    if (left === 0) {
       that.send({
         Type: 'Unsubscribe',
         URI: uri,
@@ -232,7 +242,7 @@ function Pusher(options) {
     if (that.backoff < that.maxBackoff) {
       that.backoff *= 2;
     }
-    if (that.reconnector != null) {
+    if (that.reconnector !== null) {
       clearTimeout(that.reconnector);
     }
     that.reconnector = setTimeout(that.connect, that.backoff);
@@ -241,13 +251,13 @@ function Pusher(options) {
    * send a JSON encoded obj
    */
   that.send = function(obj) {
-    if (that.socket.readyState == 1) {
+    if (that.socket.readyState === 1) {
       if (obj.Id) {
-        obj.Id = that.id + ":" + that.nextId++;
-        if (obj.callback != null) {
+        obj.Id = that.id + ':' + that.nextId++;
+        if (obj.callback !== null) {
           that.callbacks[obj.Id] = obj;
         }
-        if (obj.errback != null) {
+        if (obj.errback !== null) {
           that.errbacks[obj.Id] = obj;
         }
       }
@@ -258,4 +268,6 @@ function Pusher(options) {
   };
   that.connect();
   return that;
-}
+};
+
+module.exports = Pusher;
