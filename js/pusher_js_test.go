@@ -6,6 +6,7 @@ import (
 	"github.com/robertkrimen/otto"
 	"github.com/zond/pusher/hub"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"runtime/debug"
@@ -29,6 +30,7 @@ func must2(i interface{}, err error) {
 type ottoSocket struct {
 	o      *otto.Otto
 	socket *socknet.Socknet
+	closed bool
 	obj    *otto.Object
 	input  chan<- string
 	output <-chan string
@@ -44,6 +46,8 @@ func (self *ottoSocket) listen() {
 		must(eventObj.Set("data", s))
 		must2(self.obj.Call("onmessage", event))
 	}
+	self.obj.Set("readyState", 3)
+	must2(self.obj.Call("onclose"))
 }
 
 func (self *ottoSocket) connect(url string) {
@@ -91,9 +95,12 @@ func newOttoSocket(call otto.FunctionCall) (result otto.Value) {
 		return
 	}))
 	must(resultObj.Set("close", func(call otto.FunctionCall) (result otto.Value) {
-		resultObj.Set("readyState", 2)
-		close(socket.input)
-		resultObj.Set("readyState", 3)
+		if !socket.closed {
+			resultObj.Set("readyState", 2)
+			close(socket.input)
+			socket.closed = true
+			resultObj.Set("readyState", 3)
+		}
 		return
 	}))
 	must(resultObj.Set("send", func(call otto.FunctionCall) (result otto.Value) {
@@ -224,18 +231,22 @@ func assertWithin(t *testing.T, f func() bool, d time.Duration) {
 	}
 }
 
+func getJS(t *testing.T, o *otto.Otto, s string) bool {
+	val, err := o.Run(s)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	bo, err := val.ToBoolean()
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	return bo
+}
+
 func assertJS(t *testing.T, o *otto.Otto, s string) {
 	assertWithin(t, func() bool {
-		val, err := o.Run(s)
-		if err != nil {
-			t.Fatalf("%v", err)
-		}
-		bo, err := val.ToBoolean()
-		if err != nil {
-			t.Fatalf("%v", err)
-		}
-		return bo
-	}, time.Second*2)
+		return getJS(t, o, s)
+	}, time.Second*6)
 }
 
 func connect(t *testing.T, o *otto.Otto) {
@@ -244,14 +255,30 @@ func connect(t *testing.T, o *otto.Otto) {
 
 }
 
-func init() {
+var listener net.Listener
+
+func listen() {
 	go func() {
-		hub := hub.NewServer()
-		hub.Authorizer(func(uri, token string, write bool) (bool, error) {
-			return true, nil
-		})
-		http.ListenAndServe("0.0.0.0:2222", hub)
+		for {
+			hub := hub.NewServer()
+			hub.Authorizer(func(uri, token string, write bool) (bool, error) {
+				return true, nil
+			})
+			var err error
+			listener, err = net.Listen("tcp", ":2222")
+			if err != nil {
+				panic(err)
+			}
+			if err = http.Serve(listener, hub); err != nil && !strings.Contains(err.Error(), "closed network connection") {
+				panic(err)
+			}
+			hub.Close()
+		}
 	}()
+}
+
+func init() {
+	listen()
 }
 
 func TestConnect(t *testing.T) {
@@ -289,5 +316,21 @@ func TestSubscribeEmit(t *testing.T) {
 	must2(o.Run("pusher.authorizer = function(uri, write, cb) { cb(''); };"))
 	must2(o.Run("var received = false; pusher.on('foo', function() { received = true; });"))
 	must2(o.Run("pusher.emit('foo', 'brap, brop');"))
+	assertJS(t, o, "received")
+}
+
+func TestReSubscribeOnServerDeath(t *testing.T) {
+	o := newOtto()
+	connect(t, o)
+	must2(o.Run("pusher.authorizer = function(uri, write, cb) { cb(''); };"))
+	must2(o.Run("var received = false; pusher.on('foo', function() { received = true; });"))
+	must2(o.Run("pusher.emit('foo', 'brap, brop');"))
+	assertJS(t, o, "received")
+	if err := listener.Close(); err != nil {
+		panic(err)
+	}
+	assertJS(t, o, "pusher.socket.readyState == 3")
+	must2(o.Run("received = false;"))
+	must2(o.Run("pusher.emit('foo', 'brap, brop2');"))
 	assertJS(t, o, "received")
 }

@@ -76,8 +76,9 @@ var Pusher = function(options) {
         that.subscriptions = {};
         for (var uri in oldSubscriptions) {
           if (typeof oldSubscriptions[uri] !== 'undefined') {
-            for (var i = 0; i < oldSubscriptions[uri].length; i++) {
-              that.on(uri, oldSubscriptions[uri][i]);
+						for (var sub in oldSubscriptions[uri]) {
+						  var cb = oldSubscriptions[uri][sub];
+              that.on(uri, cb);
             }
           }
         }
@@ -105,7 +106,7 @@ var Pusher = function(options) {
       that.lastHeartbeatReceived = new Date();
     } else if (msg.Type === 'Message') {
       var subscriptions = that.subscriptions[msg.URI];
-      if (subscriptions !== null) {
+      if (typeof subscriptions !== 'undefined') {
         for (var subscription in subscriptions) {
           if (typeof subscriptions[subscription] !== 'undefined') {
             subscriptions[subscription].apply(msg, msg.Data);
@@ -236,7 +237,9 @@ var Pusher = function(options) {
    * close
    */
   that.close = function() {
-    clearInterval(that.heartbeater);
+		if (that.heartbeater !== null) {
+      clearInterval(that.heartbeater);
+		}
     that.heartbeater = null;
     that.socket.close();
     if (that.backoff < that.maxBackoff) {

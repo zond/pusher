@@ -91,9 +91,9 @@ func (self *Server) Infof(fmt string, i ...interface{}) {
 	}
 }
 
-func (self *Server) Debugf(fmt string, i ...interface{}) {
+func (self *Server) Debugf(f string, i ...interface{}) {
 	if self.loglevel > 2 {
-		self.logger.Printf("DEBUG: "+fmt, i...)
+		self.logger.Printf("DEBUG: "+f, i...)
 	}
 }
 
@@ -155,6 +155,15 @@ func (self *Server) randomId() string {
 		buf[index] = byte(rand.Int31())
 	}
 	return (base64.URLEncoding.EncodeToString(buf))
+}
+
+func (self *Server) Close() {
+	self.lock.Lock()
+	defer self.lock.Unlock()
+
+	for _, sess := range self.sessions {
+		close(sess.input)
+	}
 }
 
 func (self *Server) removeSession(id string) {
@@ -476,11 +485,15 @@ func (self *Session) Handle(ws io.ReadWriteCloser) {
 	})
 
 	var message Message
+	var ok bool
 	for {
 		select {
 		case _ = <-closing:
 			return
-		case message = <-self.input:
+		case message, ok = <-self.input:
+			if !ok {
+				return
+			}
 			self.handleMessage(message)
 		case <-time.After(self.server.heartbeat):
 			return
