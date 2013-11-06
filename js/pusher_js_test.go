@@ -334,3 +334,16 @@ func TestReSubscribeOnServerDeath(t *testing.T) {
 	must2(o.Run("pusher.emit('foo', 'brap, brop2');"))
 	assertJS(t, o, "received")
 }
+
+func TestNoReSubscribeOnReconnect(t *testing.T) {
+	o := newOtto()
+	connect(t, o)
+	must2(o.Run("pusher.authorizer = function(uri, write, cb) { cb(''); };"))
+	must2(o.Run("var received = false; pusher.on('foo', function() { received = true; });"))
+	must2(o.Run("pusher.emit('foo', 'brap, brop');"))
+	assertJS(t, o, "received")
+	must2(o.Run("received = false;"))
+	must2(o.Run("pusher.close();"))
+	must2(o.Run("pusher.emit('foo', 'brap, brop2');"))
+	assertJS(t, o, "received")
+}
