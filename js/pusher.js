@@ -42,8 +42,8 @@ var Pusher = function(options) {
     callback('');
   };
   /*
-   * set up the socket
-   */
+  * set up the socket
+  */
   that.connect = function() {
     var url = that.url;
     if (that.id !== null) {
@@ -66,8 +66,8 @@ var Pusher = function(options) {
     };
   };
   /*
-   * handle incoming messages
-   */
+  * handle incoming messages
+  */
   that.handleMessage = function(msg) {
     if (msg.Type === 'Welcome') {
       that.heartbeat = msg.Welcome.Heartbeat;
@@ -76,9 +76,11 @@ var Pusher = function(options) {
         that.subscriptions = {};
         for (var uri in oldSubscriptions) {
           if (typeof oldSubscriptions[uri] !== 'undefined') {
-						for (var sub in oldSubscriptions[uri]) {
-						  var cb = oldSubscriptions[uri][sub];
-              that.on(uri, cb);
+            for (var sub in oldSubscriptions[uri]) {
+              if (typeof oldSubscriptions[uri][sub] !== 'undefined') {
+                var cb = oldSubscriptions[uri][sub];
+                that.on(uri, cb);
+              }
             }
           }
         }
@@ -152,26 +154,26 @@ var Pusher = function(options) {
     }
     var sendFunc = null;
     var msg = {
-        Type: 'Message',
-        URI: uri,
-        Data: args.slice(1),
-        Id: true,
-        errback: function(err) {
-          if (err.Error.Type === 'AuthorizationError') {
-            that.authorizer(uri, true, function(token) {
-              that.send({
-                Type: 'Authorize',
-                URI: uri,
-                Write: true,
-                Token: token,
-                Id: true,
-                callback: sendFunc
-              });
+      Type: 'Message',
+      URI: uri,
+      Data: args.slice(1),
+      Id: true,
+      errback: function(err) {
+        if (err.Error.Type === 'AuthorizationError') {
+          that.authorizer(uri, true, function(token) {
+            that.send({
+              Type: 'Authorize',
+              URI: uri,
+              Write: true,
+              Token: token,
+              Id: true,
+              callback: sendFunc
             });
-          } else {
-            that.onerror(err);
-          }
+          });
+        } else {
+          that.onerror(err);
         }
+      }
     };
     msg.callback = function() {
       callback(msg);
@@ -234,12 +236,12 @@ var Pusher = function(options) {
     }
   };
   /*
-   * close
-   */
+  * close
+  */
   that.close = function() {
-		if (that.heartbeater !== null) {
+    if (that.heartbeater !== null) {
       clearInterval(that.heartbeater);
-		}
+    }
     that.heartbeater = null;
     that.socket.close();
     if (that.backoff < that.maxBackoff) {
@@ -251,8 +253,8 @@ var Pusher = function(options) {
     that.reconnector = setTimeout(that.connect, that.backoff);
   };
   /*
-   * send a JSON encoded obj
-   */
+  * send a JSON encoded obj
+  */
   that.send = function(obj) {
     if (that.socket.readyState === 1) {
       if (obj.Id) {
