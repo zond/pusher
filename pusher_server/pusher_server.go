@@ -3,10 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/zond/pusher/hub"
 	"log"
 	"net/http"
 	"runtime"
+
+	"github.com/zond/pusher/hub"
 )
 
 func main() {
@@ -21,5 +22,7 @@ func main() {
 	if *loglevel > 1 {
 		fmt.Printf("Processes: %d\n", runtime.GOMAXPROCS(-1))
 	}
-	log.Fatal(http.ListenAndServe(addr, hub.NewServer().Loglevel(*loglevel)))
+	http.Handle("/", http.FileServer(http.Dir("./js")))
+	http.Handle("/ws", hub.NewServer().Loglevel(*loglevel))
+	log.Fatal(http.ListenAndServe(addr, nil))
 }

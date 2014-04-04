@@ -275,4 +275,5 @@ var Pusher = function(options) {
   return that;
 };
 
-module.exports = Pusher;
+if (typeof module !== 'undefined')
+  module.exports = Pusher;

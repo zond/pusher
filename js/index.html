@@ -1,12 +1,12 @@
 
 <html>
   <head>
-   <script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+  <script src="jquery.js"></script>
   <script src="pusher.js"></script>
   <script>
   $(function() {
 
-    var pusher = new Pusher({url: "ws://localhost:2222"});
+    var pusher = new Pusher({url: "ws://localhost:2222/ws"});
     pusher.authorizer = function(uri, write) {
       return "";
     };
