@@ -111,9 +111,14 @@ var Pusher = function(options) {
       if (typeof subscriptions !== 'undefined') {
         for (var subscription in subscriptions) {
           if (typeof subscriptions[subscription] !== 'undefined') {
-            subscriptions[subscription].apply(msg, msg.Data);
+            if (msg.Data instanceof Array)
+              subscriptions[subscription].apply(msg, msg.Data);
+            else
+              subscriptions[subscription].apply(msg, [msg.Data]);
           }
         }
+      } else {
+        that.onerror(msg);
       }
     } else if (msg.Type === 'Error') {
       if (msg.Data.Type === 'Subscribe') {

@@ -1,7 +1,6 @@
 package hub
 
 import (
-	"code.google.com/p/go.net/websocket"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -13,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"code.google.com/p/go.net/websocket"
 )
 
 const (
@@ -266,6 +267,9 @@ func (self *Session) readLoop(closing chan struct{}, ws io.ReadWriteCloser) {
 	defer self.terminate(closing, ws)
 	buf := make([]byte, bufLength)
 	n, err := ws.Read(buf)
+	if err != nil {
+		self.server.Errorf("%v\t%v\t%v\t[%v]", time.Now(), self.RemoteAddr, self.id, err)
+	}
 	for err == nil {
 		if message, err := self.parseMessage(buf[:n]); err == nil {
 			self.input <- message
@@ -281,6 +285,9 @@ func (self *Session) readLoop(closing chan struct{}, ws io.ReadWriteCloser) {
 			})
 		}
 		n, err = ws.Read(buf)
+		if err != nil {
+			self.server.Errorf("%v\t%v\t%v\t[%v]", time.Now(), self.RemoteAddr, self.id, err)
+		}
 	}
 }
 
