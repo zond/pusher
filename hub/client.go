@@ -3,10 +3,11 @@ package hub
 import (
 	"encoding/json"
 	"fmt"
-	socknet "github.com/lindroth/socknet/lib"
 	"net"
 	"net/http"
 	"time"
+
+	socknet "github.com/lindroth/socknet/lib"
 )
 
 func StartServer() (net.Listener, *Server) {
@@ -40,19 +41,30 @@ func (in IncomingMessage) Next(msg_type MessageType) Message {
 }
 
 type pipe struct {
-	send   chan Message
-	recive chan Message
+	send    chan Message
+	receive chan Message
+}
+
+func (self *pipe) ReceiveMessage() (result *Message, err error) {
+	m := <-self.receive
+	result = &m
+	return
+}
+
+func (self *pipe) SendMessage(m *Message) (err error) {
+	self.send <- *m
+	return
 }
 
 func (hub *Server) InternalPipe(session_id string) (*Session, OutgoingMessage, IncomingMessage) {
 	session := hub.GetSession(session_id)
 	p := &pipe{
-		send:   make(chan Message),
-		recive: make(chan Message),
+		send:    make(chan Message),
+		receive: make(chan Message),
 	}
 	go session.Handle(p)
 
-	return session, p.send, p.recive
+	return session, p.send, p.receive
 }
 
 func (self *pipe) Read(p []byte) (n int, err error) {
@@ -69,11 +81,11 @@ func (self *pipe) Write(p []byte) (n int, err error) {
 	if err != nil {
 		panic(err)
 	}
-	self.recive <- *m
+	self.receive <- *m
 	return len(p), nil
 }
 func (self *pipe) Close() error {
-	close(self.recive)
+	close(self.receive)
 	return nil
 }
 
