@@ -46,21 +46,21 @@ type pipe struct {
 }
 
 func (self *pipe) ReceiveMessage() (result *Message, err error) {
-	m := <-self.receive
+	m := <-self.send
 	result = &m
 	return
 }
 
 func (self *pipe) SendMessage(m *Message) (err error) {
-	self.send <- *m
+	self.receive <- *m
 	return
 }
 
 func (hub *Server) InternalPipe(session_id string) (*Session, OutgoingMessage, IncomingMessage) {
 	session := hub.GetSession(session_id)
 	p := &pipe{
-		send:    make(chan Message),
-		receive: make(chan Message),
+		send:    make(chan Message, 100),
+		receive: make(chan Message, 100),
 	}
 	go session.Handle(p)
 

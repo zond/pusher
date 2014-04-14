@@ -1,8 +1,9 @@
 package hub
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestHubRecive(t *testing.T) {
@@ -62,5 +63,5 @@ func TestHubReciveInternal(t *testing.T) {
 	})
 
 	message := recv.Next(TypeMessage)
-	assert.Equal(t, message.Data, []interface{}{"Hello world"}, "Expected hello world")
+	assert.Equal(t, message.Data, []string{"Hello world"}, "Expected hello world")
 }
