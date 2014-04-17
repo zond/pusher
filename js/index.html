@@ -6,19 +6,22 @@
   <script>
   $(function() {
 
-    var pusher = new Pusher({url: "ws://localhost:2222/ws"});
-    pusher.authorizer = function(uri, write) {
-      return "";
-    };
+    var pusher = new Pusher({
+      url: "ws://localhost:2222/ws",
+      authorizer: function(uri, write) {
+        return "";
+      },
 
-    pusher.onconnect = function(msg) {
-      $("#r").prepend("<p><h2>CONNECT</h2>" + JSON.stringify(msg, "", 2) +"</p>");
-    }
+      onconnect: function(msg) {
+        $("#r").prepend("<p><h2>CONNECT</h2>" + JSON.stringify(msg, "", 2) +"</p>");
+      },
 
-    pusher.onerror = function(err) {
-      $("#r").prepend("<p><h2>ERROR</h2>" + JSON.stringify(err, "", 2) +"</p>");
-    }
-
+      onerror: function(err) {
+        $("#r").prepend("<p><h2>ERROR</h2>" + JSON.stringify(err, "", 2) +"</p>");
+      }
+    });
+    pusher.connect();
+    console.log(pusher);
 
     pusher.on("/foo", function(type, text) {
       $("#r").prepend("<p><h2>" + type + "</h2>" + text +"</p>");
