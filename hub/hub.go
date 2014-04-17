@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -263,53 +262,49 @@ func (self *Session) parseMessage(b []byte) (result Message, err error) {
 	return
 }
 
-func (self *Session) readLoop(closing chan struct{}, ws io.ReadWriteCloser) {
+type MessagePipe interface {
+	Close() error
+	ReceiveMessage() (*Message, error)
+	SendMessage(*Message) error
+}
+
+type wsWrapper struct {
+	*websocket.Conn
+}
+
+func (self *wsWrapper) ReceiveMessage() (result *Message, err error) {
+	result = &Message{}
+	err = websocket.JSON.Receive(self.Conn, result)
+	return
+}
+
+func (self *wsWrapper) SendMessage(m *Message) (err error) {
+	err = websocket.JSON.Send(self.Conn, m)
+	return
+}
+
+func (self *Session) readLoop(closing chan struct{}, ws MessagePipe) {
 	defer self.terminate(closing, ws)
-	buf := make([]byte, bufLength)
-	n, err := ws.Read(buf)
+	var err error
+	var message *Message
+	for message, err = ws.ReceiveMessage(); err == nil; message, err = ws.ReceiveMessage() {
+		self.input <- *message
+		self.server.Debugf("%v\t%v\t%v\t%v\t%v\t[received from socket]", time.Now(), message.Type, message.URI, self.RemoteAddr, self.id)
+	}
 	if err != nil {
 		self.server.Errorf("%v\t%v\t%v\t[%v]", time.Now(), self.RemoteAddr, self.id, err)
 	}
-	for err == nil {
-		if message, err := self.parseMessage(buf[:n]); err == nil {
-			self.input <- message
-			self.server.Debugf("%v\t%v\t%v\t%v\t%v\t[received from socket]", time.Now(), message.Type, message.URI, self.RemoteAddr, self.id)
-		} else {
-			self.send(Message{
-				Type: TypeError,
-				Error: &Error{
-					Message: err.Error(),
-					Type:    TypeJSONError,
-				},
-				Data: string(buf[:n]),
-			})
-		}
-		n, err = ws.Read(buf)
-		if err != nil {
-			self.server.Errorf("%v\t%v\t%v\t[%v]", time.Now(), self.RemoteAddr, self.id, err)
-		}
-	}
 }
 
-func (self *Session) writeLoop(closing chan struct{}, ws io.ReadWriteCloser) {
+func (self *Session) writeLoop(closing chan struct{}, ws MessagePipe) {
 	defer self.terminate(closing, ws)
 	var message Message
 	var err error
-	var n int
-	var encoded []byte
 	for {
 		select {
 		case message = <-self.output:
-			if encoded, err = json.Marshal(message); err == nil {
-				if n, err = ws.Write(encoded); err != nil {
-					self.server.Fatalf("Error sending %s on %+v: %v", encoded, ws, err)
-					return
-				} else if n != len(encoded) {
-					self.server.Fatalf("Unable to send all of %s on %+v: only sent %v bytes", encoded, ws, n)
-					return
-				}
-			} else {
-				self.server.Fatalf("Unable to JSON marshal %+v: %v", message, err)
+			if err = ws.SendMessage(&message); err != nil {
+				self.server.Fatalf("Error sending %s on %+v: %v", message, ws, err)
 				return
 			}
 			self.server.Debugf("%v\t%v\t%v\t%v\t%v\t[sent to socket]", time.Now(), message.Type, message.URI, self.RemoteAddr, self.id)
@@ -441,7 +436,7 @@ func (self *Session) remove() {
 	self.server.removeSession(self.id)
 }
 
-func (self *Session) terminate(closing chan struct{}, ws io.ReadWriteCloser) {
+func (self *Session) terminate(closing chan struct{}, ws MessagePipe) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
@@ -462,14 +457,14 @@ func (self *Session) terminate(closing chan struct{}, ws io.ReadWriteCloser) {
 
 func (self *Session) handleWS(ws *websocket.Conn) {
 	self.RemoteAddr = ws.Request().RemoteAddr
-	self.Handle(ws)
+	self.Handle(&wsWrapper{ws})
 }
 
 /*
  * Handle works as the session main-loop listening on events
  * on a websocket or other source that implements io.ReadWriteCloser.
  */
-func (self *Session) Handle(ws io.ReadWriteCloser) {
+func (self *Session) Handle(ws MessagePipe) {
 	self.server.Infof("%v\t-\t[connect]\t%v\t%v", time.Now(), self.RemoteAddr, self.id)
 
 	closing := make(chan struct{})

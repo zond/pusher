@@ -195,7 +195,6 @@ Pusher.prototype = {
         }
         this.onconnect(msg);
         break;
-<<<<<<< HEAD
       }
 
       case 'Heartbeat': {
@@ -281,101 +280,11 @@ Pusher.prototype = {
         obj.Id = this.id + ':' + this.nextId++;
         this.sentMessages[obj.Id] = obj;
       }
-=======
-      }
-
-      case 'Heartbeat': {
-        this.lastHeartbeatReceived = new Date();
-        break;
-      }
-
-      case 'Message': {
-        var subscriptions = this.subscriptions[msg.URI];
-        if (typeof subscriptions !== 'undefined') {
-          for (var subscription in subscriptions) {
-            if (typeof subscriptions[subscription] !== 'undefined') {
-              if (msg.Data instanceof Array)
-                subscriptions[subscription].apply(msg, msg.Data);
-              else
-                subscriptions[subscription].apply(msg, [msg.Data]);
-            }
-          }
-        } else {
-          this._handleError(msg);
-        }
-        break;
-      }
-
-      case 'Error': {
-        if (msg.Data.Type === 'Subscribe') {
-          delete(this.subscriptions[msg.Data.URI]);
-        }
-
-        this._handleError(msg);
-
-        delete(this.sentMessages[msg.Id]);
-        break;
-      }
-
-      case 'Ack': {
-        var object = this.sentMessages[msg.Id];
-        if (typeof object !== 'undefined') {
-          object.callback.call(object, msg);
-        }
-        delete(this.sentMessages[msg.Id]);
-        break;
-      }
-
-      default:
-        this._handleError(msg, 'Unknown message type ' + msg.Type);
-        break;
-    }
-  },
-
-  _handleError: function(msg, errString) {
-    if (!msg.Error) this.onerror(msg); return false;
-    switch (msg.Error.Type) {
-      case 'AuthorizationError':
-        this.authorizer(msg.URI, msg.Write || false, function(token) {
-          var authMsg = {
-            Type: 'Authorize',
-            Token: token,
-            URI: msg.URI,
-            Id: true,
-            Write: msg.Write || false,
-            callback: function() { this._send(msg); }.bind(this)
-          };
-          this._send(authMsg);
-        }.bind(this));
-        break;
-      default:
-        this.onerror({
-          Type: 'Error',
-          Error: errString || msg.Error.Message,
-          Data: msg
-        });
-        break;
-    }
-  },
-
-  /*
-  * _send a JSON encoded obj
-  */
-  _send: function(obj) {
-    if (this.socket.readyState === 1) {
-      if (obj.Id) {
-        obj.Id = this.id + ':' + this.nextId++;
-        this.sentMessages[obj.Id] = obj;
-      }
->>>>>>> 879c311f1887abe6f12bf573b30ee7e9bbb8cf07
       this.socket.send(JSON.stringify(obj));
     } else {
       this.buffer.push(obj);
     }
   }
 };
-<<<<<<< HEAD
-=======
 
 if (typeof module !== 'undefined') module.exports = Pusher;
->>>>>>> 879c311f1887abe6f12bf573b30ee7e9bbb8cf07
