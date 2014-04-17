@@ -286,5 +286,3 @@ Pusher.prototype = {
     }
   }
 };
-
-if (typeof module !== 'undefined') module.exports = Pusher;
