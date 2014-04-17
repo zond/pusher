@@ -1,113 +1,119 @@
 var Pusher = function(options) {
-  var that = this;
+  options = options || {};
   // next message id
-  that.nextId = 0;
+  this.nextId = 0;
   // socket url
-  that.url = options.url;
+  this.url = options.url;
   // heartbeat interval
-  that.heartbeat = null;
+  this.heartbeat = null;
   // session id
-  that.id = null;
+  this.id = null;
   // min backoff
-  that.minBackoff = 500;
+  this.minBackoff = 500;
   // max backoff
-  that.maxBackoff = 30000;
+  this.maxBackoff = 30000;
   // exponential backoff
-  that.backoff = that.minBackoff;
+  this.backoff = this.minBackoff;
   // interval that sends heartbeats
-  that.heartbeater = null;
+  this.heartbeater = null;
   // socket
-  that.socket = null;
+  this.socket = null;
   // reconnect timeout
-  that.reconnector = null;
+  this.reconnector = null;
   // buffer while closed
-  that.buffer = [];
+  this.buffer = [];
   // subscriptions
-  that.subscriptions = {};
+  this.subscriptions = {};
   // callbacks
-  that.callbacks = {};
+  this.callbacks = {};
   // errbacks
-  that.errbacks = {};
-  // error handler
-  that.onerror = options.onerror || function(err) {
-    console.log('pusher error:', err);
-  };
-  // on connect handler
-  that.onconnect = options.onconnect || function(msg) {
-    console.log('pusher connected:', msg);
-  };
-  // authorizer is a function that generate authorization tokens for your rights.
-  that.authorizer = options.authorizer || function(uri, write, callback) {
-    console.log('authorizer returned empty token for ', uri, write);
-    callback('');
-  };
-  /*
-  * set up the socket
-  */
-  that.connect = function() {
-    var url = that.url;
-    if (that.id !== null) {
-      url += '?session_id=' + that.id;
+  this.errbacks = {};
+
+  if (options.onerror) this.onerror = options.onerror;
+  if (options.onconnect) this.onconnect = options.onconnect;
+  if (options.authorizer) this.authorizer = options.authorizer;
+};
+
+Pusher.prototype.connect = function() {
+  var self = this;
+  var url = this.url;
+  if (this.id !== null) {
+    url = this.url + '?session_id=' + this.id;
+  }
+  this.socket = new WebSocket(url);
+
+  this.socket.onopen = function() {
+    this.lastHeartbeatReceived = new Date();
+    this.backoff = this.minBackoff;
+  }.bind(this);
+
+  this.socket.onerror = function(err) {
+    this.onerror(err);
+  }.bind(this);
+
+  this.socket.onmessage = function(message) {
+    var msg = JSON.parse(message.data);
+    this.handleMessage(msg);
+  }.bind(this);
+
+  this.socket.onclose = function() {
+    this.close();
+  }.bind(this);
+
+};
+
+Pusher.prototype.heartbeater = function() {
+  if (new Date().getTime() - this.lastHeartbeatReceived.getTime() > this.heartbeat) {
+    this.close();
+  } else {
+    if (this.socket.readyState === 1) {
+      this.send({
+        Type: 'Heartbeat'
+      });
     }
-    that.socket = new WebSocket(url);
-    that.socket.onopen = function() {
-      that.lastHeartbeatReceived = new Date();
-      that.backoff = that.minBackoff;
-    };
-    that.socket.onerror = function(err) {
-      that.onerror(err);
-    };
-    that.socket.onmessage = function(message) {
-      var msg = JSON.parse(message.data);
-      that.handleMessage(msg);
-    };
-    that.socket.onclose = function() {
-      that.close();
-    };
-  };
-  /*
-  * handle incoming messages
-  */
-  that.handleMessage = function(msg) {
-    if (msg.Type === 'Welcome') {
-      that.heartbeat = msg.Welcome.Heartbeat;
-      if (that.id !== null && msg.Welcome.Id !== that.id) {
-        var oldSubscriptions = that.subscriptions;
-        that.subscriptions = {};
+  }
+};
+
+/*
+* handle incoming messages
+*/
+Pusher.prototype.handleMessage = function(msg) {
+  switch (msg.Type) {
+    case 'Welcome': {
+      this.heartbeat = msg.Welcome.Heartbeat;
+      if (this.id !== null && msg.Welcome.Id !== this.id) {
+        var oldSubscriptions = this.subscriptions;
+        this.subscriptions = {};
         for (var uri in oldSubscriptions) {
           if (typeof oldSubscriptions[uri] !== 'undefined') {
             for (var sub in oldSubscriptions[uri]) {
               if (typeof oldSubscriptions[uri][sub] !== 'undefined') {
                 var cb = oldSubscriptions[uri][sub];
-                that.on(uri, cb);
+                this.on(uri, cb);
               }
             }
           }
         }
       }
-      that.id = msg.Welcome.Id;
-      if (that.heartbeater !== null) {
-        clearInterval(that.heartbeater);
+      this.id = msg.Welcome.Id;
+      if (this.heartbeater !== null) {
+        clearInterval(this.heartbeater);
       }
-      that.heartbeater = setInterval(function() {
-        if (new Date().getTime() - that.lastHeartbeatReceived.getTime() > that.heartbeat) {
-          that.close();
-        } else {
-          if (that.socket.readyState === 1) {
-            that.send({
-              Type: 'Heartbeat'
-            });
-          }
-        }
-      }, that.heartbeat / 2);
-      while (that.buffer.length > 0) {
-        that.send(that.buffer.shift());
+      setInterval(this.heartbeater, this.heartbeat / 2);
+      while (this.buffer.length > 0) {
+        this.send(this.buffer.shift());
       }
-      that.onconnect(msg);
-    } else if (msg.Type === 'Heartbeat') {
-      that.lastHeartbeatReceived = new Date();
-    } else if (msg.Type === 'Message') {
-      var subscriptions = that.subscriptions[msg.URI];
+      this.onconnect(msg);
+      break;
+    }
+
+    case 'Heartbeat': {
+      this.lastHeartbeatReceived = new Date();
+      break;
+    }
+
+    case 'Message': {
+      var subscriptions = this.subscriptions[msg.URI];
       if (typeof subscriptions !== 'undefined') {
         for (var subscription in subscriptions) {
           if (typeof subscriptions[subscription] !== 'undefined') {
@@ -118,167 +124,198 @@ var Pusher = function(options) {
           }
         }
       } else {
-        that.onerror(msg);
+        this.onerror(msg);
       }
-    } else if (msg.Type === 'Error') {
+      break;
+    }
+
+    case 'Error': {
       if (msg.Data.Type === 'Subscribe') {
-        delete(that.subscriptions[msg.Data.URI]);
+        delete(this.subscriptions[msg.Data.URI]);
       }
-      var obj = that.errbacks[msg.Id];
+      var obj = this.errbacks[msg.Id];
       if (typeof obj !== 'undefined' && obj.errback) {
         obj.errback.call(obj, msg);
       } else {
-        that.onerror(msg);
+        this.onerror(msg);
       }
-      delete(that.errbacks[msg.Id]);
-      delete(that.callbacks[msg.Id]);
-    } else if (msg.Type === 'Ack') {
-      var object = that.callbacks[msg.Id];
+      delete(this.errbacks[msg.Id]);
+      delete(this.callbacks[msg.Id]);
+      break;
+    }
+
+    case 'Ack': {
+      var object = this.callbacks[msg.Id];
       if (typeof object !== 'undefined') {
         object.callback.call(object, msg);
       }
-      delete(that.callbacks[msg.Id]);
-      delete(that.errbacks[msg.Id]);
-    } else {
-      that.onerror({
+      delete(this.callbacks[msg.Id]);
+      delete(this.errbacks[msg.Id]);
+      break;
+    }
+
+    case 'AuthorizationError': {
+      console.log('AUTH ERR');
+    }
+
+    default:
+      this.onerror({
         Type: 'Error',
         Error: 'Unknown message type ' + msg.Type,
         Data: msg
       });
-    }
-  };
-  that.emit = function(uri) {
-    // Copy arguments, becouse slice changes it.
-    var args = null;
-    var callback = function() {};
-    if (typeof (arguments[arguments.length-1]) === 'function') {
-      args = Array.prototype.slice.call(arguments, 0, arguments.length - 1);
-      callback = arguments[arguments.length - 1];
-    } else {
-      args = Array.prototype.slice.call(arguments, 0);
-    }
-    var sendFunc = null;
-    var msg = {
-      Type: 'Message',
-      URI: uri,
-      Data: args.slice(1),
-      Id: true,
-      errback: function(err) {
-        if (err.Error.Type === 'AuthorizationError') {
-          that.authorizer(uri, true, function(token) {
-            that.send({
-              Type: 'Authorize',
-              URI: uri,
-              Write: true,
-              Token: token,
-              Id: true,
-              callback: sendFunc
-            });
-          });
-        } else {
-          that.onerror(err);
-        }
-      }
-    };
-    msg.callback = function() {
-      callback(msg);
-    };
-    sendFunc = function() {
-      that.send(msg);
-    };
-    sendFunc();
-  };
-  that.on = function(uri, subscription, callback) {
-    if (typeof that.subscriptions[uri] === 'undefined') {
-      that.send({
-        Type: 'Subscribe',
-        URI: uri,
-        Id: true,
-        callback: function() {
-          if (typeof that.subscriptions[uri] === 'undefined') {
-            that.subscriptions[uri] = {};
-          }
-          that.subscriptions[uri][subscription] = subscription;
-          if (typeof callback !== 'undefined') {
-            callback(uri);
-          }
-        },
-        errback: function(err) {
-          if (err.Error.Type === 'AuthorizationError') {
-            that.authorizer(uri, false, function(token) {
-              that.send({
-                Type: 'Authorize',
-                URI: uri,
-                Id: true,
-                Token: token,
-                callback: function() {
-                  that.on(uri, subscription, callback);
-                }
-              });
-            });
-          } else {
-            that.onerror(err);
-          }
-        }
-      });
-    }
-  };
-  that.off = function(uri, subscription) {
-    delete(that.subscriptions[uri][subscription]);
-    var left = 0;
-    for (var sub in that.subscriptions[uri]) {
-      if (that.subscriptions[uri]) {
-        left++;
-      }
-    }
-    if (left === 0) {
-      that.send({
-        Type: 'Unsubscribe',
-        URI: uri,
-        Id: true
-      });
-      delete(that.subscriptions[uri]);
-    }
-  };
-  /*
-  * close
-  */
-  that.close = function() {
-    if (that.heartbeater !== null) {
-      clearInterval(that.heartbeater);
-    }
-    that.heartbeater = null;
-    that.socket.close();
-    if (that.backoff < that.maxBackoff) {
-      that.backoff *= 2;
-    }
-    if (that.reconnector !== null) {
-      clearTimeout(that.reconnector);
-    }
-    that.reconnector = setTimeout(that.connect, that.backoff);
-  };
-  /*
-  * send a JSON encoded obj
-  */
-  that.send = function(obj) {
-    if (that.socket.readyState === 1) {
-      if (obj.Id) {
-        obj.Id = that.id + ':' + that.nextId++;
-        if (typeof obj.callback !== 'undefined') {
-          that.callbacks[obj.Id] = obj;
-        }
-        if (typeof obj.errback !== null) {
-          that.errbacks[obj.Id] = obj;
-        }
-      }
-      that.socket.send(JSON.stringify(obj));
-    } else {
-      that.buffer.push(obj);
-    }
-  };
-  that.connect();
-  return that;
+      break;
+  }
 };
 
-if (typeof module !== 'undefined')
-  module.exports = Pusher;
+Pusher.prototype.emit = function(uri) {
+  // Copy arguments, becouse slice changes it.
+  var args = null;
+  var callback = function() {};
+  if (typeof (arguments[arguments.length-1]) === 'function') {
+    args = Array.prototype.slice.call(arguments, 0, arguments.length - 1);
+    callback = arguments[arguments.length - 1];
+  } else {
+    args = Array.prototype.slice.call(arguments, 0);
+  }
+  var msg = Pusher.createMessage(uri, {data: args.slice(1), type: 'Message'}, callback);
+  this.send(msg);
+};
+
+/*
+* send a JSON encoded obj
+*/
+Pusher.prototype.send = function(obj) {
+  if (this.socket.readyState === 1) {
+    if (obj.Id) {
+      obj.Id = this.id + ':' + this.nextId++;
+      if (typeof obj.callback !== 'undefined') {
+        this.callbacks[obj.Id] = obj;
+      }
+      if (typeof obj.errback !== null) {
+        this.errbacks[obj.Id] = obj;
+      }
+    }
+    this.socket.send(JSON.stringify(obj));
+  } else {
+    this.buffer.push(obj);
+  }
+};
+
+Pusher.createMessage = function(uri, data, cb) {
+  var msg = {
+    Type: data.type,
+    URI: uri,
+    Data: data.data,
+    Id: true,
+    callback: function() { cb(this); },
+    errback: function(err) {
+      if (err.Error.Type === 'AuthorizationError') {
+        this.authorizer(uri, true, function(token) {
+          var authMessage = this.createAuthMessage(uri, token, true, authorizedCallback);
+          this.send(authMessage);
+        }).bind(this);
+      } else {
+        this.onerror(err);
+      }
+    }.bind(this)
+  };
+  var authorizedCallback = function() { this.send(msg); }.bind(this);
+  return msg;
+};
+
+Pusher.createAuthMessage = function(uri, token, write, callback) {
+  return {
+    Type: 'Authorize',
+    Token: token,
+    URI: uri,
+    Id: true,
+    Write: write,
+    callback: callback
+  };
+};
+
+Pusher.prototype.on = function(uri, subscription, callback) {
+  if (typeof this.subscriptions[uri] === 'undefined') {
+
+    this.send({
+      Type: 'Subscribe',
+      URI: uri,
+      Id: true,
+      callback: function() {
+        if (typeof this.subscriptions[uri] === 'undefined') {
+          this.subscriptions[uri] = {};
+        }
+        this.subscriptions[uri][subscription] = subscription;
+        if (typeof callback !== 'undefined') {
+          callback(uri);
+        }
+      }.bind(this),
+      errback: function(err) {
+        if (err.Error.Type === 'AuthorizationError') {
+          this.authorizer(uri, false, function(token) {
+            var authMessage = this.createAuthMessage(uri, token, false, function() {
+              this.on(uri, subscription, callback)
+            }.bind(this));
+            this.send(authMessage);
+          }).bind(this);
+        } else {
+          this.onerror(err);
+        }
+      }.bind(this)
+    });
+  }
+};
+
+Pusher.prototype.off = function(uri, subscription) {
+  delete(this.subscriptions[uri][subscription]);
+  var left = 0;
+  for (var sub in this.subscriptions[uri]) {
+    if (this.subscriptions[uri]) {
+      left++;
+    }
+  }
+  if (left === 0) {
+    this.send({
+      Type: 'Unsubscribe',
+      URI: uri,
+      Id: true
+    });
+    delete(this.subscriptions[uri]);
+  }
+};
+
+/*
+* close
+*/
+Pusher.prototype.close = function() {
+  if (this.heartbeater !== null) {
+    clearInterval(this.heartbeater);
+  }
+  this.heartbeater = null;
+  this.socket.close();
+  if (this.backoff < this.maxBackoff) {
+    this.backoff *= 2;
+  }
+  if (this.reconnector !== null) {
+    clearTimeout(this.reconnector);
+  }
+
+  this.reconnector = setTimeout(this.connect.bind(this), this.backoff);
+};
+
+// error handler
+Pusher.prototype.onerror = function(err) {
+  console.log('pusher error:', err);
+};
+// on connect handler
+Pusher.prototype.onconnect = function(msg) {
+  console.log('pusher connected:', msg);
+};
+// authorizer is a function that generate authorization tokens for your rights.
+Pusher.prototype.authorizer = function(uri, write, callback) {
+  console.log('authorizer returned empty token for ', uri, write);
+  callback('');
+};
+
+if (typeof module !== 'undefined') module.exports = Pusher;
