@@ -23,3 +23,4 @@ _testmain.go
 *.swp
 
 node_modules
+testem.log

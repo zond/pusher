@@ -2,26 +2,12 @@
 <html>
   <head>
   <script src="jquery.js"></script>
-  <script src="sockete.js"></script>
   <script src="pusher.js"></script>
   <script>
   $(function() {
 
-    //Sockete.mock();
-    var ok_server = Sockete.Server.configure('ws://ok.host', function () {
-      this.onmessage('Message').respond(JSON.stringify({"Type":"Error","Id":"227a0000","Error":{"Message":"MT9282wofb0iwpcjtZBgtw== not authorized for subscribing to /soundzone/U291bmRab25lLCwxazc3bThrNXV5by9Mb2NhdGlvbiwsMWpmaG9kdGFzamsvQWNjb3VudCwsMWpudm8yM3g0aHMv/emitEvent/SoundZone/soundzonechange","Type":"AuthorizationError"},"Data":{"Type":"Subscribe","Id":"227a0000","URI":"/soundzone/U291bmRab25lLCwxazc3bThrNXV5by9Mb2NhdGlvbiwsMWpmaG9kdGFzamsvQWNjb3VudCwsMWpudm8yM3g0aHMv/emitEvent/SoundZone/soundzonechange"}}));
-      this.onmessage('Authorize').respond(JSON.stringify({"Type":"Ack","Id":"227a0000","Data":["Message","testdata"]}));
-      this.onmessage('Subscribe').respond(JSON.stringify({"Type":"Ack","Id":"227a0000","Data":["Message","testdata"]}));
-      this.onmessage('Wrong message').fail('So sorry');
-    });
-
-    var fail_server = Sockete.Server.configure('ws://fail.host', function () {
-      this.onconnect().fail('Nope!')
-    });
-
     var pusher = new Pusher({
       url: "ws://localhost:2222/ws",
-     // url: "ws://ok.host",
       authorizer: function(uri, write, cb) {
         cb('');
       },
@@ -35,7 +21,6 @@
       }
     });
     pusher.connect();
-    console.log(pusher);
 
     pusher.subscribe("/foo", function(type, text) {
       $("#r").prepend("<p><h2>" + type + "</h2>" + text +"</p>");

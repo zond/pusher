@@ -4,7 +4,7 @@
   "description": "Websocket client lib",
   "main": "pusher.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "./node_modules/.bin/testem"
   },
   "repository": {
     "type": "git",
@@ -17,6 +17,8 @@
   },
   "devDependencies": {
     "gulp-wrap-umd": "~0.2.0",
-    "gulp": "~3.6.1"
+    "gulp": "~3.6.1",
+    "chai": "~1.9.1",
+    "testem": "~0.6.15"
   }
 }
