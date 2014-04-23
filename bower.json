@@ -1,7 +1,7 @@
 {
   "name": "Pusher",
   "version": "0.0.1",
-  "main": "build/js/pusher.js",
+  "main": "dist/pusher.js",
   "ignore": [
     "js",
     "pusher_server",
