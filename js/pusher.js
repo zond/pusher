@@ -156,7 +156,7 @@ Pusher.prototype = {
     callback('');
   },
 
-  _heartbeater: function() {
+  _beat: function() {
     if (new Date().getTime() - this.lastHeartbeatReceived.getTime() > this.heartbeat) {
       this.close();
     } else {
@@ -193,7 +193,7 @@ Pusher.prototype = {
         if (this._heartbeater !== null) {
           clearInterval(this._heartbeater);
         }
-        setInterval(this._heartbeater, this.heartbeat / 2);
+        setInterval(this._beat.bind(this), this.heartbeat / 2);
         while (this.buffer.length > 0) {
           this._send(this.buffer.shift());
         }
@@ -237,7 +237,7 @@ Pusher.prototype = {
 
       case 'Ack': {
         var object = this.sentMessages[msg.Id];
-        if (typeof object !== 'undefined') {
+        if (typeof object !== 'undefined' && object.callback) {
           object.callback.call(object, msg);
         }
         delete(this.sentMessages[msg.Id]);
@@ -257,14 +257,14 @@ Pusher.prototype = {
     }
     switch (msg.Error.Type) {
       case 'AuthorizationError':
-        this.authorizer(msg.URI, msg.Write || false, function(token) {
+        this.authorizer(msg.Data.URI, msg.Data.Write || false, function(token) {
           var authMsg = {
             Type: 'Authorize',
             Token: token,
-            URI: msg.URI,
+            URI: msg.Data.URI,
             Id: true,
-            Write: msg.Write || false,
-            callback: function() { this._send(msg); }.bind(this)
+            Write: msg.Data.Write || false,
+            callback: function() { this._send(msg.Data); }.bind(this)
           };
           this._send(authMsg);
         }.bind(this));
