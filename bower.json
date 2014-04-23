@@ -5,6 +5,7 @@
   "ignore": [
     "js",
     "pusher_server",
+    "hub",
     "spec",
     ".bowerrc",
     ".gitignore",
@@ -13,6 +14,7 @@
     "bower.json",
     "gruntfile.js",
     "package.json",
-    "README.md"
+    "README.md",
+    "testem.json"
   ]
 }
