@@ -5,7 +5,7 @@
   } else if (typeof exports === 'object') {
     module.exports = factory(require, exports, module);
   } else {
-    root.gulpWrapUmd = factory();
+    root.Pusher = factory();
   }
 }(this, function(require, exports, module) {
 
