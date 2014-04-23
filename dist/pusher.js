@@ -9,7 +9,7 @@
   }
 }(this, function(require, exports, module) {
 
-return Pusher = function(options) {
+var Pusher = function(options) {
   options = options || {};
   // next message id
   this.nextId = 0;
@@ -305,6 +305,7 @@ Pusher.prototype = {
     }
   }
 };
-;
+
+return Pusher;
 
 }));

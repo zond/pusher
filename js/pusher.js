@@ -1,4 +1,4 @@
-Pusher = function(options) {
+var Pusher = function(options) {
   options = options || {};
   // next message id
   this.nextId = 0;
