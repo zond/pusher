@@ -9,7 +9,7 @@
   }
 }(this, function(require, exports, module) {
 
-return var Pusher = function(options) {
+return Pusher = function(options) {
   options = options || {};
   // next message id
   this.nextId = 0;
@@ -18,7 +18,7 @@ return var Pusher = function(options) {
   // heartbeat interval
   this.heartbeat = null;
   // session id
-  this.id = null;
+  this.id = options.id || null;
   // min backoff
   this.minBackoff = 500;
   // max backoff
@@ -41,6 +41,7 @@ return var Pusher = function(options) {
   if (options.onerror) this.onerror = options.onerror;
   if (options.onconnect) this.onconnect = options.onconnect;
   if (options.authorizer) this.authorizer = options.authorizer;
+  if (options.socket) this.socket = options.socket;
 };
 
 Pusher.prototype = {
@@ -50,7 +51,10 @@ Pusher.prototype = {
     if (this.id !== null) {
       url = this.url + '?session_id=' + this.id;
     }
-    this.socket = new WebSocket(url);
+
+    if (!this.socket) {
+      this.socket = new WebSocket(url);
+    }
 
     this.socket.onopen = function() {
       this.lastHeartbeatReceived = new Date();
@@ -218,10 +222,11 @@ Pusher.prototype = {
         if (typeof subscriptions !== 'undefined') {
           for (var subscription in subscriptions) {
             if (typeof subscriptions[subscription] !== 'undefined') {
-              if (msg.Data instanceof Array)
+              if (msg.Data instanceof Array) {
                 subscriptions[subscription].apply(msg, msg.Data);
-              else
+              } else {
                 subscriptions[subscription].apply(msg, [msg.Data]);
+              }
             }
           }
         } else {
@@ -257,7 +262,10 @@ Pusher.prototype = {
   },
 
   _handleError: function(msg, errString) {
-    if (!msg.Error) this.onerror(msg); return false;
+    if (!msg.Error) {
+      this.onerror(msg);
+      return false;
+    }
     switch (msg.Error.Type) {
       case 'AuthorizationError':
         this.authorizer(msg.URI, msg.Write || false, function(token) {
