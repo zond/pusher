@@ -115,7 +115,9 @@ Pusher.prototype = {
   },
 
   unsubscribe: function(uri, subscription) {
-    delete(this.subscriptions[uri][subscription]);
+    if (this.subscriptions[uri] && this.subscriptions[uri][subscription]) {
+      delete(this.subscriptions[uri][subscription]);
+    }
     var left = 0;
     for (var sub in this.subscriptions[uri]) {
       if (this.subscriptions[uri]) {
