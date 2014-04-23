@@ -15,6 +15,7 @@
     "gruntfile.js",
     "package.json",
     "README.md",
-    "testem.json"
+    "testem.json",
+    "gulpfile.js"
   ]
 }
