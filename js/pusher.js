@@ -260,12 +260,13 @@ Pusher.prototype = {
     switch (msg.Error.Type) {
       case 'AuthorizationError':
         this.authorizer(msg.Data.URI, msg.Data.Write || false, function(token) {
+          var write = (msg.Data.Type === 'Message') ? true : false;
           var authMsg = {
             Type: 'Authorize',
             Token: token,
             URI: msg.Data.URI,
             Id: true,
-            Write: msg.Data.Write || false,
+            Write: write,
             callback: function() { this._send(msg.Data); }.bind(this)
           };
           this._send(authMsg);
