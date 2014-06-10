@@ -382,6 +382,7 @@ func (self *Session) handleMessage(message Message) {
 		}
 		self.server.addSubscription(self, message.URI)
 	case TypeAuthorize:
+		self.server.Debugf("%v\t%v\t%v\t[authorizing %#v/%v]", time.Now(), message.URI, self.RemoteAddr, message.Token, message.Write)
 		if self.server.authorizer != nil {
 			ok, err := self.server.authorizer(message.URI, message.Token, message.Write)
 			if err != nil {
