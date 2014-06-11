@@ -45,8 +45,8 @@ func TestHubReciveInternal(t *testing.T) {
 
 	// Expect an
 	input_welcome := recv.Next(TypeWelcome)
-	assert.Equal(t, input_welcome.Welcome.Heartbeat, 5000, "Expected a hartbeat setting")
-	assert.Equal(t, input_welcome.Welcome.SessionTimeout, 30000, "Expected a hartbeat setting")
+	assert.NotEqual(t, input_welcome.Welcome.Heartbeat, 0, "Expected a heartbeat setting")
+	assert.NotEqual(t, input_welcome.Welcome.SessionTimeout, 0, "Expected a heartbeat setting")
 
 	send <- Message{
 		Type: TypeSubscribe,
