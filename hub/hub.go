@@ -17,8 +17,8 @@ import (
 
 const (
 	defaultBufferSize     = 1024
-	defaultHeartbeat      = time.Second * 5
-	defaultSessionTimeout = time.Second * 30
+	defaultHeartbeat      = time.Second * 60
+	defaultSessionTimeout = time.Second * 180
 	idLength              = 16
 	bufLength             = 4096
 	defaultLoglevel       = 1
