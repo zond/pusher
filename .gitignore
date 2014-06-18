@@ -21,3 +21,7 @@ _testmain.go
 
 *.exe
 *.swp
+
+node_modules
+testem.log
+bower_components
