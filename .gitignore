@@ -24,3 +24,4 @@ _testmain.go
 
 node_modules
 testem.log
+bower_components

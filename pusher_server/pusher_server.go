@@ -22,7 +22,8 @@ func main() {
 	if *loglevel > 1 {
 		fmt.Printf("Processes: %d\n", runtime.GOMAXPROCS(-1))
 	}
-	http.Handle("/", http.FileServer(http.Dir("./js")))
+	// http.Handle("/", http.FileServer(http.Dir("./js")))
+	http.Handle("/", http.FileServer(http.Dir("./")))
 	http.Handle("/ws", hub.NewServer().Loglevel(*loglevel))
 	log.Fatal(http.ListenAndServe(addr, nil))
 }

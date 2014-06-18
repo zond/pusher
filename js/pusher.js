@@ -1,299 +1,335 @@
-var Pusher = function(options) {
-  options = options || {};
-  // next message id
-  this.nextId = 0;
-  // socket url
-  this.url = options.url;
-  // heartbeat interval
-  this.heartbeat = null;
-  // session id
-  this.id = options.id || null;
-  // min backoff
-  this.minBackoff = 500;
-  // max backoff
-  this.maxBackoff = 30000;
-  // exponential backoff
-  this.backoff = this.minBackoff;
-  // interval that sends heartbeats
-  this._heartbeater = null;
-  // socket
-  this.socket = null;
-  // reconnect timeout
-  this.reconnector = null;
-  // buffer while closed
-  this.buffer = [];
-  // subscriptions
-  this.subscriptions = {};
-  // sentMessages
-  this.sentMessages = {};
+var parseUrl = function(url){
+  var parser = document.createElement('a');
+  parser.href = url;
 
-  if (options.onerror) this.onerror = options.onerror;
-  if (options.onconnect) this.onconnect = options.onconnect;
-  if (options.authorizer) this.authorizer = options.authorizer;
-  if (options.socket) this.socket = options.socket;
+  return {
+    protocol: parser.protocol, // => "http:"
+    hostname: parser.hostname, // => "example.com"
+    port: parser.port,         // => "3000"
+    pathname: parser.pathname, // => "/pathname/"
+    serach: parser.search,     // => "?search=test"
+    hash: parser.hash,         // => "#hash"
+    host: parser.host          // => "example.com:3000"
+  };
 };
 
-Pusher.prototype = {
+var Pusher = Pusher || {};
 
-  connect: function() {
-    var url = this.url;
-    if (this.id !== null) {
-      url = this.url + '?session_id=' + this.id;
+Pusher.Transport = {};
+
+Pusher.Transport.Socket = function(options){
+  options = options || {};
+
+  this.loglevel = options.loglevel || 'warn';
+  this.seqNo = 0;
+  this.minBackoff = options.minBackoff || 500;
+  this.maxBackoff = options.maxBackoff || 10000;
+  this.backoff = null;
+  this.lastMessageReceivedAt = null;
+
+  this.callbacks = {};
+  this.buffer = [];
+  this.subscriptions = {};
+  this.emitter = new EventEmitter();
+  this.socket = options.socket || null; // This is used for DI during testing.
+};
+Pusher.Transport.Socket.prototype = {
+  open: function(host){
+    if(host) {
+      this.host = parseUrl(host);
     }
 
-    if (!this.socket) {
-      this.socket = new WebSocket(url);
+    if(!this.socket){
+      this.socket = this.openSocket();
     }
+  },
 
-    this.socket.onopen = function() {
-      this.lastHeartbeatReceived = new Date();
+  reconnect: function(){
+    if(this.socket) {
+      this.socket.close();
+    }
+    this.open();
+
+    this.backoff *= 2;
+    this.backoff = this.backoff > this.maxBackoff ? this.maxBackoff : this.backoff;
+  },
+
+  openSocket: function(){
+    var socket = new WebSocket(this._buildURL());
+
+    socket.onopen = function() {
+      this.isClosed = false;
+      this.lastHeartbeatReceivedAt = new Date();
       this.backoff = this.minBackoff;
+      this.emitter.emit('connect');
     }.bind(this);
 
-    this.socket.onerror = function(err) {
-      this._handleMessage(err);
+    socket.onerror = function(message){
+      console.warn('Pusher error: ', message.data);
     }.bind(this);
 
-    this.socket.onmessage = function(message) {
-      var msg = JSON.parse(message.data);
-      this._handleMessage(msg);
+    socket.onmessage = function(message){
+      this.read(message.data);
     }.bind(this);
 
-    this.socket.onclose = function() {
-      this.close();
+    socket.onclose = function(){
+      this.socket = null;
+      if(!this.isClosed){ // We have lost the connection, *not* an active close
+        this.stopHeartbeat();
+        this.startReconnections();
+      }
+      this.emitter.emit('close');
     }.bind(this);
+
+    return socket;
   },
 
-  emit: function(uri) {
-    // Copy arguments, becouse slice changes it.
-    var args = null;
-    var callback = function() {};
-    if (typeof (arguments[arguments.length-1]) === 'function') {
-      args = Array.prototype.slice.call(arguments, 0, arguments.length - 1);
-      callback = arguments[arguments.length - 1];
+  close: function(){
+    console.trace();
+
+    this.isClosed = true;
+    this.stopHeartbeat();
+    this.stopReconnections();
+    this.socket.close();
+  },
+
+  write: function(msg){
+    if(this.socket && this.socket.readyState === 1){
+      msg.Id = this.id + ':' + this.seqNo++;
+
+      if(msg.callback){
+        this.callbacks[msg.Id] = msg.callback;
+        delete msg.callback;
+      }
+
+
+      this.socket.send(JSON.stringify(msg));
     } else {
-      args = Array.prototype.slice.call(arguments, 0);
+      this.buffer.push(msg);
     }
-    var msg = {
-      Type: 'Message',
-      URI: uri,
-      Data: args.slice(1),
-      Id: true,
-      callback: callback
-    };
-    this._send(msg);
   },
 
-  subscribe: function(uri, subscription, callback) {
-    if (typeof this.subscriptions[uri] === 'undefined') {
-      this._send({
-        Type: 'Subscribe',
-        URI: uri,
-        Id: true,
-        callback: function() {
-          if (typeof this.subscriptions[uri] === 'undefined') {
-            this.subscriptions[uri] = {};
-          }
-          this.subscriptions[uri][subscription] = subscription;
-          if (typeof callback !== 'undefined') {
-            callback(uri);
-          }
+  read: function(data){
+    var packet;
+
+    try {
+      packet = JSON.parse(data);
+    } catch(e){
+      this.error(e);
+      return;
+    }
+
+    var MESSAGE_TYPES = ['Welcome', 'Heartbeat', 'Ack', 'Message'];
+
+    if(MESSAGE_TYPES.indexOf(packet.Type) > -1) {
+      this.lastMessageReceivedAt = new Date();
+
+      var method = packet.Type.toLowerCase();
+
+      if(this[method]) this[method].call(this, packet);
+
+      this.emitter.emit('read', packet);
+    } else {
+      this.error(packet);
+    }
+  },
+
+  welcome: function(packet){
+    this.id = packet.Welcome.Id;
+    this.heartbeatInterval = packet.Welcome.Heartbeat;
+
+    this.startHeartbeat();
+    this.sendBuffer();
+  },
+
+  heartbeat: function(packet){
+    if(this.loglevel === 'info') console.info('Heartbeat received: ', new Date().toString());
+  },
+
+  ack: function(packet){
+    var cb = this.callbacks[packet.Id];
+
+    delete this.callbacks[packet.Id];
+    if(cb) cb(packet);
+  },
+
+  message: function(packet){
+    this.emitter.emit('message', packet);
+  },
+
+  error: function(packet){
+    if(packet.Error.Type !== 'AuthorizationError') {
+      console.warn('Error from Pusher.Transport.Socket', packet.Error.Type, packet);
+      this.emitter.emit('error', packet);
+    } else {
+      this.emitter.emit('authorization error', packet);
+    }
+  },
+
+
+  destroy: function(){
+    this.close();
+    this.emitter.removeAllListeners();
+    this.socket = null;
+  },
+
+  on: function(event, cb){
+    this.emitter.on.apply(this.emitter, arguments);
+  },
+
+  off: function(event, cb){
+    this.emitter.off.apply(this.emitter, arguments);
+  },
+
+
+  sendBuffer: function(){
+    var msg;
+    while(msg = this.buffer.shift()){
+      this.write(msg);
+    }
+  },
+
+  startHeartbeat: function(){
+    this.heartbeater = setInterval(function(){
+      if(this.loglevel === 'info') console.info('Sending heartbeat: ', new Date().toString());
+      this.write({
+        Type: 'Heartbeat'
+      });
+    }.bind(this), this.heartbeatInterval / 2);
+  },
+
+  stopHeartbeat: function(){
+    clearInterval(this.heartbeater);
+  },
+
+
+  startReconnections: function(){
+    this.reconnector = setTimeout(this.reconnect.bind(this), this.backoff);
+  },
+
+  stopReconnections: function(){
+    this.clearInterval(this.reconnector);
+  },
+
+  _buildURL: function(){
+    var protocol = parseUrl(window.location.toString()).protocol === 'https:' ? 'wss:' : 'ws:';
+    var url = protocol + '//' + this.host.host;
+
+    if(this.host.pathname) url += this.host.pathname;
+
+    // TODO: Make session_id configurable?
+    if(this.host.search) {
+      url += this.host.search;
+      if(this.id) {
+        url += '&session_id=' + this.id;
+      }
+    } else if(this.id) {
+      url += '?session_id=' + this.id;
+    }
+
+    return url;
+  }
+};
+
+Pusher.Client = function(options){
+  options = options || {};
+
+  if(!options.authorizer){
+    throw new Error('You must specify an authorizer for Pusher!');
+  }
+
+  this.authorizer = options.authorizer;
+  this.loglevel = options.loglevel || 'warn';
+
+  this.maxRetries = options.maxRetries || 3;
+  this.socket = options.socket || new Pusher.Transport.Socket({ loglevel: this.loglevel }); // Used for DI during testing.
+
+  this.message = this.message.bind(this);
+  this.error = this.error.bind(this);
+  this.authorize = this.authorize.bind(this);
+
+  this.socket.on('message', this.message);
+  this.socket.on('error', this.error);
+  this.socket.on('authorization error', this.authorize);
+
+  this.socket.on('connect', function(){
+    this.retries = 0;
+    this.emitter.emit('connect');
+  }.bind(this));
+
+  this.emitter = new EventEmitter();
+};
+
+Pusher.Client.prototype = {
+  connect: function(uri){
+    this.socket.open(uri);
+  },
+
+  subscribe: function(channel, cb){
+    this.emitter.on(channel, cb);
+    this.socket.write({
+      Type: 'Subscribe',
+      URI: channel
+    });
+  },
+
+  unsubscribe: function(channel){
+    this.emitter.off(channel, cb);
+    this.socket.write({
+      Type: 'Unsubscribe',
+      URI: channel
+    });
+  },
+
+  emit: function(){ // channel, ...data
+    var args = [].slice.call(arguments);
+    var channel = args.shift();
+    var data = args;
+
+    this.socket.write({
+      Type: 'Message',
+      URI: channel,
+      Data: data
+    });
+  },
+
+  message: function(packet){
+    this.emitter.emit(packet.URI, packet.Data);
+  },
+
+  authorize: function(packet){
+    if(this.retries >= this.maxRetries) return;
+
+    var isWrite = packet.Data.Type === 'Message';
+    this.authorizer(packet.Data.URI, isWrite, function(token){
+      this.socket.write({
+        Type: 'Authorize',
+        Token: token,
+        URI: packet.Data.URI,
+        Write: isWrite,
+        callback: function(){
+          this.retries = 0;
+          this.socket.write(packet.Data); // Resends the failed packet that we need authorization for.
         }.bind(this)
       });
-    }
+    }.bind(this));
+    this.retries++;
   },
 
-  unsubscribe: function(uri, subscription) {
-    if (this.subscriptions[uri] && this.subscriptions[uri][subscription]) {
-      delete(this.subscriptions[uri][subscription]);
-    }
-    var left = 0;
-    for (var sub in this.subscriptions[uri]) {
-      if (this.subscriptions[uri]) {
-        left++;
-      }
-    }
-    if (left === 0) {
-      this._send({
-        Type: 'Unsubscribe',
-        URI: uri,
-        Id: true
-      });
-      delete(this.subscriptions[uri]);
-    }
+  error: function(packet){
+    console.warn('Unknown pusher error:', packet);
   },
 
-  /*
-  * close
-  */
-  close: function() {
-    if (this._heartbeater !== null) {
-      clearInterval(this._heartbeater);
-    }
-    this._heartbeater = null;
-    this.socket.close();
-    if (this.backoff < this.maxBackoff) {
-      this.backoff *= 2;
-    }
-    if (this.reconnector !== null) {
-      clearTimeout(this.reconnector);
-    }
-
-    this.reconnector = setTimeout(this.connect.bind(this), this.backoff);
+  on: function(){
+    this.emitter.on.apply(this.emitter, arguments);
   },
 
-  // error handler
-  onerror: function(err) {
-    console.log('pusher error:', err);
+  off: function(){
+    this.emitter.off.apply(this.emitter, arguments);
   },
 
-  // on connect handler
-  onconnect: function(msg) {
-    console.log('pusher connected:', msg);
-  },
-
-  // authorizer is a function that generate authorization tokens for your rights.
-  authorizer: function(uri, write, callback) {
-    console.log('authorizer returned empty token for ', uri, write);
-    callback('');
-  },
-
-  _beat: function() {
-    if (new Date().getTime() - this.lastHeartbeatReceived.getTime() > this.heartbeat) {
-      this.close();
-    } else {
-      if (this.socket.readyState === 1) {
-        this._send({
-          Type: 'Heartbeat'
-        });
-      }
-    }
-  },
-
-  /*
-  * handle incoming messages
-  */
-  _handleMessage: function(msg) {
-    switch (msg.Type) {
-      case 'Welcome': {
-        this.heartbeat = msg.Welcome.Heartbeat;
-        if (this.id !== null && msg.Welcome.Id !== this.id) {
-          var oldSubscriptions = this.subscriptions;
-          this.subscriptions = {};
-          for (var uri in oldSubscriptions) {
-            if (typeof oldSubscriptions[uri] !== 'undefined') {
-              for (var sub in oldSubscriptions[uri]) {
-                if (typeof oldSubscriptions[uri][sub] !== 'undefined') {
-                  var cb = oldSubscriptions[uri][sub];
-                  this.subscribe(uri, cb);
-                }
-              }
-            }
-          }
-        }
-        this.id = msg.Welcome.Id;
-        if (this._heartbeater !== null) {
-          clearInterval(this._heartbeater);
-        }
-        setInterval(this._beat.bind(this), this.heartbeat / 2);
-        while (this.buffer.length > 0) {
-          this._send(this.buffer.shift());
-        }
-        this.onconnect(msg);
-        break;
-      }
-
-      case 'Heartbeat': {
-        this.lastHeartbeatReceived = new Date();
-        break;
-      }
-
-      case 'Message': {
-        var subscriptions = this.subscriptions[msg.URI];
-        if (typeof subscriptions !== 'undefined') {
-          for (var subscription in subscriptions) {
-            if (typeof subscriptions[subscription] !== 'undefined') {
-              if (msg.Data instanceof Array) {
-                subscriptions[subscription].apply(msg, msg.Data);
-              } else {
-                subscriptions[subscription].apply(msg, [msg.Data]);
-              }
-            }
-          }
-        } else {
-          this._handleError(msg);
-        }
-        break;
-      }
-
-      case 'Error': {
-        if (msg.Data.Type === 'Subscribe') {
-          delete(this.subscriptions[msg.Data.URI]);
-        }
-
-        this._handleError(msg);
-
-        delete(this.sentMessages[msg.Id]);
-        break;
-      }
-
-      case 'Ack': {
-        var object = this.sentMessages[msg.Id];
-        if (typeof object !== 'undefined' && object.callback) {
-          object.callback.call(object, msg);
-        }
-        delete(this.sentMessages[msg.Id]);
-        break;
-      }
-
-      default:
-        this._handleError(msg, 'Unknown message type ' + msg.Type);
-        break;
-    }
-  },
-
-  _handleError: function(msg, errString) {
-    if (!msg.Error) {
-      this.onerror(msg);
-      return false;
-    }
-    switch (msg.Error.Type) {
-      case 'AuthorizationError':
-        this.authorizer(msg.Data.URI, msg.Data.Write || false, function(token) {
-          var write = (msg.Data.Type === 'Message') ? true : false;
-          var authMsg = {
-            Type: 'Authorize',
-            Token: token,
-            URI: msg.Data.URI,
-            Id: true,
-            Write: write,
-            callback: function() { this._send(msg.Data); }.bind(this)
-          };
-          this._send(authMsg);
-        }.bind(this));
-        break;
-      default:
-        this.onerror({
-          Type: 'Error',
-          Error: errString || msg.Error.Message,
-          Data: msg
-        });
-        break;
-    }
-  },
-
-  /*
-  * _send a JSON encoded obj
-  */
-  _send: function(obj) {
-    if (this.socket.readyState === 1) {
-      if (obj.Id) {
-        obj.Id = this.id + ':' + this.nextId++;
-        this.sentMessages[obj.Id] = obj;
-      }
-      this.socket.send(JSON.stringify(obj));
-    } else {
-      this.buffer.push(obj);
-    }
+  destroy: function(){
+    this.socket.destroy();
+    this.emitter.removeAllListeners();
   }
 };

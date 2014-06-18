@@ -17,5 +17,8 @@
     "README.md",
     "testem.json",
     "gulpfile.js"
-  ]
+  ],
+  "dependencies": {
+    "eventEmitter": "~4.2.7"
+  }
 }

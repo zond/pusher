@@ -2,37 +2,36 @@
 <html>
   <head>
   <script src="jquery.js"></script>
+  <script src="../bower_components/eventEmitter/EventEmitter.js"></script>
   <script src="pusher.js"></script>
   <script>
   $(function() {
 
-    var pusher = new Pusher({
-      url: "ws://localhost:2222/ws",
-      authorizer: function(uri, write, cb) {
-        cb('');
-      },
-
-      onconnect: function(msg) {
-        $("#r").prepend("<p><h2>CONNECT</h2>" + JSON.stringify(msg, "", 2) +"</p>");
-      },
-
-      onerror: function(err) {
-        $("#r").prepend("<p><h2>ERROR</h2>" + JSON.stringify(err, "", 2) +"</p>");
+    var pusher = new Pusher.Client({
+      loglevel: 'info',
+      authorizer: function(uri, isWrite, cb) {
+        cb('Pf-RAwEBDXRva2VuRW52ZWxvcGUB_5IAAQMBCUV4cGlyZXNBdAH_igABBEhhc2gBCgABBVRva2VuARAAAAAQ_4kFAQEEVGltZQH_igAAAP_x_5IBDwEAAAAOzRTVnSQugoQAAAFAOBKWI9mbB4Yf-8Vkz8WCaFQs6QXkms9DMRb5fI8vJcAlpMXwg2ucUew2HvNsSJlcxaPVpzx5UtU_H0fpQQumggETKmNvbW1vbi5BY2Nlc3NUb2tlbv-TAwEBC0FjY2Vzc1Rva2VuAf-UAAEIAQlQcmluY2lwYWwBDAABBEtleXMB_5YAAQtDcmVkZW50aWFscwEKAAEISXNzdWVkQXQB_4oAAQxBY2Nlc3NTY29wZXMB_5oAAQxJc0F1dGhvcml6ZWQBAgABCFJlc291cmNlAQwAAQNVSUQBBAAAACH_lQQBARFtYXBbc3RyaW5nXXN0cmluZwH_lgABDAEMAAAd_5kCAQEOW11jb21tb24uU2NvcGUB_5oAAf-YAAAr_5cDAQEFU2NvcGUB_5gAAQIBBEtpbmQBDAABClByaXZpbGVnZWQBAgAAAP4BXv-U_gFYARJVc2VyLCwxbTlwOTRyNml2NC8CQMN-oVkYqyLxruOF1S7qTIpd0FNzl--xVRqEx8FCbozpzH_dyTWNqmTEYvkELSesMrLtllqjczW1O77YLNtEaHMBDwEAAAAOyzOiHSQuXA4AAAEUAQNBQ0wAAQNBQ0wBAQABBFVzZXIAAQRVc2VyAQEAAQhMb2NhdGlvbgABCExvY2F0aW9uAQEAAQdBY2NvdW50AAEHQWNjb3VudAEBAAEFQXNzZXQAAQRTbG90AAEEU2xvdAEBAAEIU2NoZWR1bGUAAQhTY2hlZHVsZQEBAAEJU291bmRab25lAAEJU291bmRab25lAQEAAQ5TcG90aWZ5QWNjb3VudAABDlNwb3RpZnlBY2NvdW50AQEAAQVPcmRlcgABDVBheW1lbnRNZXRob2QAAQ1QYXltZW50TWV0aG9kAQEAA_itedFEHYUlVAAA');
       }
     });
-    pusher.connect();
 
-    pusher.subscribe("/foo", function(type, text) {
-      $("#r").prepend("<p><h2>" + type + "</h2>" + text +"</p>");
-    }, function(x) {
-      $("#r").prepend("<p><h2>Subscribed on</h2>" + x +"</p>");
+    pusher.on('connect', function(){
+      $("#r").prepend("<p><h2>DID CONNECT</p>");
+    });
+
+    pusher.on('error', function(err){
+      $("#r").prepend("<p><h2>ERROR</h2>" + JSON.stringify(err, "", 2) +"</p>");
+    });
+
+    // pusher.connect("ws://localhost:2222/ws");
+    pusher.connect("ws://localhost:8082/");
+
+    pusher.subscribe("/accounts/QWNjb3VudCwsMWI0NjB4Y2F6Mjgv/Account/Account/pong", function(text) {
+      $("#r").prepend("<p>" + text +"</p>");
     });
 
     $("#f").submit(function(event) {
       event.preventDefault();
-      pusher.emit("/foo", "Message", $("input[name=data]", this).val(), function(msg) { 
-        $("#r").prepend("<p><h2>Sent</h2>" + msg.Id +"</p>");
-      });
+      pusher.emit("/accounts/QWNjb3VudCwsMWI0NjB4Y2F6Mjgv/Account/Account/pong", $("input[name=data]", this).val())
     });
 
     $("#reset").click(function(event) {
