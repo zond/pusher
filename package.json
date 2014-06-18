@@ -19,6 +19,7 @@
     "gulp-wrap-umd": "~0.2.0",
     "gulp": "~3.6.1",
     "chai": "~1.9.1",
-    "testem": "~0.6.15"
+    "testem": "~0.6.15",
+    "gulp-concat": "~2.2.0"
   }
 }
