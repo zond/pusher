@@ -17,8 +17,8 @@ import (
 
 const (
 	defaultBufferSize     = 1024
-	defaultHeartbeat      = time.Second * 5
-	defaultSessionTimeout = time.Second * 30
+	defaultHeartbeat      = time.Second * 60
+	defaultSessionTimeout = time.Second * 180
 	idLength              = 16
 	bufLength             = 4096
 	defaultLoglevel       = 1
@@ -382,6 +382,7 @@ func (self *Session) handleMessage(message Message) {
 		}
 		self.server.addSubscription(self, message.URI)
 	case TypeAuthorize:
+		self.server.Debugf("%v\t%v\t%v\t[authorizing %#v/%v]", time.Now(), message.URI, self.RemoteAddr, message.Token, message.Write)
 		if self.server.authorizer != nil {
 			ok, err := self.server.authorizer(message.URI, message.Token, message.Write)
 			if err != nil {
