@@ -85,8 +85,8 @@ Pusher.Transport.Socket.prototype = {
   },
 
   close: function(){
-    console.trace();
-
+    this.buffer = [];
+    this.callbacks = {};
     this.isClosed = true;
     this.stopHeartbeat();
     this.stopReconnections();
