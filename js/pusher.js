@@ -294,6 +294,7 @@ Pusher.Client.prototype = {
   },
 
   message: function(packet){
+    this.emitter.emit('message', packet);
     this.emitter.emit(packet.URI, packet.Data);
   },
 
