@@ -569,8 +569,8 @@ Pusher.Transport.Socket.prototype = {
   },
 
   close: function(){
-    console.trace();
-
+    this.buffer = [];
+    this.callbacks = {};
     this.isClosed = true;
     this.stopHeartbeat();
     this.stopReconnections();
@@ -757,7 +757,7 @@ Pusher.Client.prototype = {
     });
   },
 
-  unsubscribe: function(channel){
+  unsubscribe: function(channel, cb){
     this.emitter.off(channel, cb);
     this.socket.write({
       Type: 'Unsubscribe',
