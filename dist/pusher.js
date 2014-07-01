@@ -508,7 +508,7 @@ Pusher.Transport.Socket = function(options){
   this.seqNo = 0;
   this.minBackoff = options.minBackoff || 500;
   this.maxBackoff = options.maxBackoff || 10000;
-  this.backoff = null;
+  this.backoff = this.minBackoff;
   this.lastMessageReceivedAt = null;
 
   this.callbacks = {};
@@ -544,7 +544,6 @@ Pusher.Transport.Socket.prototype = {
     socket.onopen = function() {
       this.isClosed = false;
       this.lastHeartbeatReceivedAt = new Date();
-      this.backoff = this.minBackoff;
       this.emitter.emit('connect');
     }.bind(this);
 

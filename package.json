@@ -1,6 +1,6 @@
 {
   "name": "pusher",
-  "version": "0.0.0",
+  "version": "0.0.5",
   "description": "Websocket client lib",
   "main": "pusher.js",
   "scripts": {
