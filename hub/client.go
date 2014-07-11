@@ -89,11 +89,11 @@ func (self *pipe) Close() error {
 	return nil
 }
 
-func Connect(session_id string) (OutgoingMessage, IncomingMessage) {
+func Connect(session_id, origin, location string) (OutgoingMessage, IncomingMessage) {
 	input := make(chan Message)
 	output := make(chan Message)
 	ws := socknet.Socknet{}
-	ws_input, ws_output, err := ws.Connect("http://localhost/2233", "ws://localhost:2233/", nil)
+	ws_input, ws_output, err := ws.Connect(origin, location, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -121,4 +121,43 @@ func Connect(session_id string) (OutgoingMessage, IncomingMessage) {
 		}
 	}()
 	return input, output
+}
+
+type Client struct {
+	idIncr   int
+	id       string
+	outgoing OutgoingMessage
+	incoming IncomingMessage
+}
+
+func (self *Client) getNextId() string {
+	self.idIncr++
+	return self.id + string(self.idIncr)
+}
+
+func (self *Client) Connect(origin, location string) {
+	self.outgoing, self.incoming = Connect("", origin, location)
+	welcome := self.incoming.Next(TypeWelcome)
+	self.id = welcome.Welcome.Id
+	go func() {
+		for {
+			self.outgoing <- Message{Type: TypeHeartbeat}
+			time.Sleep(time.Millisecond * welcome.Welcome.Heartbeat)
+		}
+	}()
+}
+func (self *Client) Authorize(uri, token string) (err error) {
+	self.outgoing <- Message{Type: TypeAuthorize, URI: uri, Token: token, Write: true, Id: self.getNextId()}
+	self.incoming.Next(TypeAck)
+	return
+}
+
+func (self *Client) Subscribe(uri string) (err error) {
+	self.outgoing <- Message{Type: TypeSubscribe, URI: uri, Id: self.getNextId()}
+	self.incoming.Next(TypeAck)
+	return
+}
+
+func (self *Client) Next(msgType MessageType) Message {
+	return self.incoming.Next(msgType)
 }

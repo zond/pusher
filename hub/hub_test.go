@@ -11,12 +11,12 @@ func TestHubRecive(t *testing.T) {
 	defer l.Close()
 
 	// Create new session using ws
-	send, recv := Connect("")
+	send, recv := Connect("", "http://localhost/2233", "ws://localhost:2233/")
 
 	// Expect an
 	input_welcome := recv.Next(TypeWelcome)
-	assert.Equal(t, input_welcome.Welcome.Heartbeat, 5000, "Expected a hartbeat setting")
-	assert.Equal(t, input_welcome.Welcome.SessionTimeout, 30000, "Expected a hartbeat setting")
+	assert.Equal(t, input_welcome.Welcome.Heartbeat, 60000, "Expected a hartbeat setting")
+	assert.Equal(t, input_welcome.Welcome.SessionTimeout, 180000, "Expected a hartbeat setting")
 
 	send <- Message{
 		Type: TypeSubscribe,
