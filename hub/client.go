@@ -158,6 +158,12 @@ func (self *Client) Subscribe(uri string) (err error) {
 	return
 }
 
+func (self *Client) Unsubscribe(uri string) (err error) {
+	self.outgoing <- Message{Type: TypeUnsubscribe, URI: uri, Id: self.getNextId()}
+	self.incoming.Next(TypeAck)
+	return
+}
+
 func (self *Client) Next(msgType MessageType) Message {
 	return self.incoming.Next(msgType)
 }
