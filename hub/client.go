@@ -89,11 +89,11 @@ func (self *pipe) Close() error {
 	return nil
 }
 
-func Connect(session_id string) (OutgoingMessage, IncomingMessage) {
+func Connect(session_id, origin, location string) (OutgoingMessage, IncomingMessage) {
 	input := make(chan Message)
 	output := make(chan Message)
 	ws := socknet.Socknet{}
-	ws_input, ws_output, err := ws.Connect("http://localhost/2233", "ws://localhost:2233/", nil)
+	ws_input, ws_output, err := ws.Connect(origin, location, nil)
 	if err != nil {
 		panic(err)
 	}
