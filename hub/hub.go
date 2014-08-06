@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	defaultBufferSize         = 1024
+	defaultBufferSize         = 128
 	defaultHeartbeat          = time.Second * 60
 	defaultHeartbeatGracetime = time.Second * 5
 	defaultSessionTimeout     = time.Second * 180
