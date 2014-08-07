@@ -112,6 +112,7 @@ func Connect(session_id, origin, location string) (OutgoingMessage, IncomingMess
 
 	/* Marshal outgount messages, and forward */
 	go func() {
+		defer close(ws_input)
 		for m := range input {
 			encoded, err := json.Marshal(m)
 			if err != nil {

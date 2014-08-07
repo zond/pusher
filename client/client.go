@@ -2,6 +2,7 @@ package client
 
 import (
 	"time"
+
 	"github.com/zond/pusher/hub"
 )
 
@@ -28,6 +29,10 @@ func (self *Client) Connect(origin, location string) {
 		}
 	}()
 }
+func (self *Client) Close() {
+	close(self.outgoing)
+}
+
 func (self *Client) Authorize(uri, token string) (err error) {
 	self.outgoing <- hub.Message{Type: hub.TypeAuthorize, URI: uri, Token: token, Write: true, Id: self.getNextId()}
 	self.incoming.Next(hub.TypeAck)
@@ -49,4 +54,3 @@ func (self *Client) Unsubscribe(uri string) (err error) {
 func (self *Client) Next(msgType hub.MessageType) hub.Message {
 	return self.incoming.Next(msgType)
 }
-
