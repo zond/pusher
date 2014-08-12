@@ -21,7 +21,6 @@ const (
 	defaultHeartbeatGracetime = time.Second * 5
 	defaultSessionTimeout     = time.Second * 180
 	idLength                  = 16
-	bufLength                 = 4096
 	defaultLoglevel           = 1
 )
 
