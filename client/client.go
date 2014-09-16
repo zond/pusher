@@ -1,6 +1,8 @@
 package client
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/zond/pusher/hub"
@@ -11,6 +13,7 @@ type Client struct {
 	id       string
 	outgoing hub.OutgoingMessage
 	incoming hub.IncomingMessage
+	closed   chan bool
 }
 
 func (self *Client) getNextId() string {
@@ -20,16 +23,33 @@ func (self *Client) getNextId() string {
 
 func (self *Client) Connect(origin, location string) {
 	self.outgoing, self.incoming = hub.Connect("", origin, location)
+	self.closed = make(chan bool)
 	welcome := self.incoming.Next(hub.TypeWelcome)
 	self.id = welcome.Welcome.Id
 	go func() {
+		defer func() {
+			if e := recover(); e != nil {
+				if !strings.Contains(fmt.Sprint(e), "closed channel") {
+					panic(e)
+				}
+			}
+		}()
 		for {
-			self.outgoing <- hub.Message{Type: hub.TypeHeartbeat}
+			select {
+			case self.outgoing <- hub.Message{Type: hub.TypeHeartbeat}:
+			case _, ok := <-self.closed:
+				if !ok {
+					break
+				}
+			default:
+				break
+			}
 			time.Sleep(time.Millisecond * welcome.Welcome.Heartbeat)
 		}
 	}()
 }
 func (self *Client) Close() {
+	close(self.closed)
 	close(self.outgoing)
 }
 
