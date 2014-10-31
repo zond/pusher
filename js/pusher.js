@@ -89,7 +89,9 @@ Pusher.Transport.Socket.prototype = {
     this.isClosed = true;
     this.stopHeartbeat();
     this.stopReconnections();
-    this.socket.close();
+    if(this.socket) {
+      this.socket.close();
+    }
   },
 
   write: function(msg){
@@ -198,7 +200,9 @@ Pusher.Transport.Socket.prototype = {
   },
 
   stopHeartbeat: function(){
-    clearInterval(this.heartbeater);
+    if(this.heartbeater) {
+      clearInterval(this.heartbeater);
+    }
   },
 
 
@@ -207,7 +211,9 @@ Pusher.Transport.Socket.prototype = {
   },
 
   stopReconnections: function(){
-    this.clearInterval(this.reconnector);
+    if(this.reconnector) {
+      this.clearInterval(this.reconnector);
+    }
   },
 
   _buildURL: function(){
