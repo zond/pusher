@@ -736,7 +736,7 @@ Pusher.Client = function(options){
   this.socket.on('authorization error', this.authorize);
 
   this.socket.on('connect', function(){
-    this.retries = 0;
+    this.retries = {};
     this.emitter.emit('connect');
   }.bind(this));
 
@@ -782,7 +782,7 @@ Pusher.Client.prototype = {
   },
 
   authorize: function(packet){
-    if(this.retries >= this.maxRetries) return;
+    if(this.retries[packet.Id] && this.retries[packet.Id] >= this.maxRetries) return;
 
     var isWrite = packet.Data.Type === 'Message';
     this.authorizer(packet.Data.URI, isWrite, function(token){
@@ -792,12 +792,12 @@ Pusher.Client.prototype = {
         URI: packet.Data.URI,
         Write: isWrite,
         callback: function(){
-          this.retries = 0;
+          delete this.retries[packet.Id];
           this.socket.write(packet.Data); // Resends the failed packet that we need authorization for.
         }.bind(this)
       });
     }.bind(this));
-    this.retries++;
+    this.retries[packet.Id] = this.retries[packet.Id] ? this.retries[packet.Id] + 1 : 1;
   },
 
   error: function(packet){
