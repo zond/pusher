@@ -54,7 +54,6 @@ Pusher.Transport.Socket = function(options){
 
   this.callbacks = {};
   this.buffer = [];
-  this.subscriptions = {};
   this.emitter = new EventEmitter();
   this.socket = options.socket || null; // This is used for DI during testing.
 };
@@ -77,6 +76,7 @@ Pusher.Transport.Socket.prototype = {
 
     this.backoff *= 2;
     this.backoff = this.backoff > this.maxBackoff ? this.maxBackoff : this.backoff;
+    this.emitter.emit('reconnecting');
   },
 
   openSocket: function(){
@@ -216,6 +216,7 @@ Pusher.Transport.Socket.prototype = {
   },
 
   startHeartbeat: function(){
+    this.stopHeartbeat();
     this.heartbeater = setInterval(function(){
       if(this.loglevel === 'info') console.info('Sending heartbeat: ', new Date().toString());
       this.write({
@@ -277,10 +278,12 @@ Pusher.Client = function(options){
   this.message = this.message.bind(this);
   this.error = this.error.bind(this);
   this.authorize = this.authorize.bind(this);
+  this.resubscribe = this.resubscribe.bind(this);
 
   this.socket.on('message', this.message);
   this.socket.on('error', this.error);
   this.socket.on('authorization error', this.authorize);
+  this.socket.on('reconnecting', this.resubscribe);
 
   this.socket.on('connect', function(){
     this.retries = {};
@@ -295,8 +298,25 @@ Pusher.Client.prototype = {
     this.socket.open(uri);
   },
 
+  resubscribe: function() {
+    var channels = this.emitter._getEvents();
+    var socket = this;
+
+    for (channel in channels) {
+      if(channel === 'connect' || channel === 'message') {
+        continue;
+      }
+      if(this.loglevel === 'info') console.info('Resubscribing to ', channel);
+      socket.subscribe(channel);
+    }
+
+  },
+
   subscribe: function(channel, cb){
-    this.emitter.on(channel, cb);
+    if(this.loglevel === 'info') console.info('Sending subscribe message for ', channel);
+    if(cb) {
+      this.emitter.on(channel, cb);
+    }
     this.socket.write({
       Type: 'Subscribe',
       URI: channel
@@ -305,6 +325,12 @@ Pusher.Client.prototype = {
 
   unsubscribe: function(channel, cb){
     this.emitter.off(channel, cb);
+    var remainingListeners = this.emitter.getListeners(channel);
+    if(remainingListeners && remainingListeners.length > 0) {
+      if(this.loglevel === 'info') console.info('There are still listeners on ', channel, ' - ergo: dont unsubscribe');
+      return;
+    }
+    if(this.loglevel === 'info') console.info('Sending unsubscribe message for ', channel);
     this.socket.write({
       Type: 'Unsubscribe',
       URI: channel
