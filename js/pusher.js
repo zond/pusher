@@ -57,6 +57,7 @@ Pusher.Transport.Socket = function(options){
   this.emitter = new EventEmitter();
   this.socket = options.socket || null; // This is used for DI during testing.
 
+  this.emitReconnected = this.emitReconnected.bind(this);
   this.onOnline = this.onOnline.bind(this);
   this.onOffline = this.onOffline.bind(this);
   this.startConnectivityListeners = this.startConnectivityListeners.bind(this);
@@ -84,13 +85,16 @@ Pusher.Transport.Socket.prototype = {
         this.socket = null;
       }
     }
-    this.once('connect', function() {
-      this.emitter.emit('reconnected');
-    }.bind(this));
+    this.on('connect', this.emitReconnected);
     this.open();
 
     this.backoff *= 2;
     this.backoff = this.backoff > this.maxBackoff ? this.maxBackoff : this.backoff;
+  },
+
+  emitReconnected: function() {
+    this.emitter.emit('reconnected');
+    return true;
   },
 
   openSocket: function(){
