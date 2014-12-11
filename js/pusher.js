@@ -56,6 +56,12 @@ Pusher.Transport.Socket = function(options){
   this.buffer = [];
   this.emitter = new EventEmitter();
   this.socket = options.socket || null; // This is used for DI during testing.
+
+  this.onOnline = this.onOnline.bind(this);
+  this.onOffline = this.onOffline.bind(this);
+  this.startConnectivityListeners = this.startConnectivityListeners.bind(this);
+  this.stopConnectivityListeners = this.stopConnectivityListeners.bind(this);
+  this.startConnectivityListeners();
 };
 Pusher.Transport.Socket.prototype = {
   open: function(host){
@@ -69,23 +75,33 @@ Pusher.Transport.Socket.prototype = {
   },
 
   reconnect: function(){
-    if(this.socket) {
+    if(this.loglevel === 'info') console.info('Trying to reconnect', this.socket);
+    if(this.socket && this.socket.readyState !== WebSocket.CLOSING) {
       this.socket.close();
+    } else if(this.socket && this.socket.readyState === WebSocket.CLOSING) {
+      this.socket.onclose = function() {
+        if(this.loglevel === 'info') console.info('Ignoring onclose on old socket');
+        this.socket = null;
+      }
     }
+    this.once('connect', function() {
+      this.emitter.emit('reconnected');
+    }.bind(this));
     this.open();
 
     this.backoff *= 2;
     this.backoff = this.backoff > this.maxBackoff ? this.maxBackoff : this.backoff;
-    this.emitter.emit('reconnecting');
   },
 
   openSocket: function(){
+    if(this.loglevel === 'info') console.info('Opening a new socket');
     var socket = new WebSocket(this._buildURL());
 
     socket.onopen = function() {
       this.isClosed = false;
       this.lastHeartbeatReceivedAt = new Date();
       this.emitter.emit('connect');
+      this.backoff = this.minBackoff;
     }.bind(this);
 
     socket.onerror = function(message){
@@ -119,8 +135,36 @@ Pusher.Transport.Socket.prototype = {
     }
   },
 
+  startConnectivityListeners: function() {
+    this.stopConnectivityListeners();
+    if (typeof window.addEventListener === "function") {
+      if(this.loglevel === 'info') console.info('Adding connectivity listeners');
+      window.addEventListener('online', this.onOnline, false);
+      window.addEventListener('offline', this.onOffline, false);
+    }
+  },
+
+  stopConnectivityListeners: function() {
+    if (typeof window.removeEventListener === "function") {
+      if(this.loglevel === 'info') console.info('Removing connectivity listeners');
+      window.removeEventListener('online', this.onOnline, false);
+      window.removeEventListener('offline', this.onOffline, false);
+    }
+  },
+
+  onOnline: function() {
+    if(this.loglevel === 'info') console.info('Gained connection..');
+    this.startReconnections();
+  },
+
+  onOffline: function() {
+    if(this.loglevel === 'info') console.info('Lost connection.. Stopping heartbeats and reconnections.');
+    this.stopHeartbeat();
+    this.stopReconnections();
+  },
+
   write: function(msg){
-    if(this.socket && this.socket.readyState === 1){
+    if(this.socket && this.socket.readyState === WebSocket.OPEN){
       msg.Id = this.id + ':' + this.seqNo++;
 
       if(msg.callback){
@@ -192,15 +236,19 @@ Pusher.Transport.Socket.prototype = {
     }
   },
 
-
   destroy: function(){
     this.close();
     this.emitter.removeAllListeners();
     this.socket = null;
+    this.stopConnectivityListeners();
   },
 
   on: function(event, cb){
     this.emitter.on.apply(this.emitter, arguments);
+  },
+
+  once: function(event, cb){
+    this.emitter.once.apply(this.emitter, arguments);
   },
 
   off: function(event, cb){
@@ -231,14 +279,13 @@ Pusher.Transport.Socket.prototype = {
     }
   },
 
-
   startReconnections: function(){
     this.reconnector = setTimeout(this.reconnect.bind(this), this.backoff);
   },
 
   stopReconnections: function(){
     if(this.reconnector) {
-      this.clearInterval(this.reconnector);
+      clearInterval(this.reconnector);
     }
   },
 
@@ -283,7 +330,7 @@ Pusher.Client = function(options){
   this.socket.on('message', this.message);
   this.socket.on('error', this.error);
   this.socket.on('authorization error', this.authorize);
-  this.socket.on('reconnecting', this.resubscribe);
+  this.socket.on('reconnected', this.resubscribe);
 
   this.socket.on('connect', function(){
     this.retries = {};
