@@ -294,7 +294,7 @@ Pusher.Transport.Socket.prototype = {
   },
 
   _buildURL: function(){
-    var protocol = parseUrl(window.location.toString()).protocol === 'https:' ? 'wss:' : 'ws:';
+    var protocol = ['https:', 'wss:'].indexOf(this.host.protocol) > -1 ? 'wss:' : 'ws:';
     var url = protocol + '//' + this.host.host;
 
     if(this.host.pathname) url += this.host.pathname;
