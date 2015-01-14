@@ -16,12 +16,12 @@ import (
 )
 
 const (
-	defaultBufferSize     = 1024
-	defaultHeartbeat      = time.Second * 60
-	defaultSessionTimeout = time.Second * 180
-	idLength              = 16
-	bufLength             = 4096
-	defaultLoglevel       = 1
+	defaultBufferSize         = 128
+	defaultHeartbeat          = time.Second * 60
+	defaultHeartbeatGracetime = time.Second * 5
+	defaultSessionTimeout     = time.Second * 180
+	idLength                  = 16
+	defaultLoglevel           = 1
 )
 
 func init() {
@@ -39,29 +39,31 @@ func prettify(obj interface{}) string {
 }
 
 type Server struct {
-	heartbeat      time.Duration
-	sessionTimeout time.Duration
-	sessions       map[string]*Session
-	subscriptions  map[string]map[string]*Session
-	subscribers    map[string]map[string]bool
-	lock           *sync.RWMutex
-	loglevel       int
-	bufferSize     int
-	logger         *log.Logger
-	authorizer     Authorizer
+	heartbeat          time.Duration
+	heartbeatGracetime time.Duration
+	sessionTimeout     time.Duration
+	sessions           map[string]*Session
+	subscriptions      map[string]map[string]*Session
+	subscribers        map[string]map[string]bool
+	lock               *sync.RWMutex
+	loglevel           int
+	bufferSize         int
+	logger             *log.Logger
+	authorizer         Authorizer
 }
 
 func NewServer() *Server {
 	return &Server{
-		heartbeat:      defaultHeartbeat,
-		bufferSize:     defaultBufferSize,
-		sessionTimeout: defaultSessionTimeout,
-		loglevel:       defaultLoglevel,
-		sessions:       map[string]*Session{},
-		subscriptions:  map[string]map[string]*Session{},
-		subscribers:    map[string]map[string]bool{},
-		lock:           &sync.RWMutex{},
-		logger:         log.New(os.Stdout, "pusher: ", 0),
+		heartbeat:          defaultHeartbeat,
+		heartbeatGracetime: defaultHeartbeatGracetime,
+		bufferSize:         defaultBufferSize,
+		sessionTimeout:     defaultSessionTimeout,
+		loglevel:           defaultLoglevel,
+		sessions:           map[string]*Session{},
+		subscriptions:      map[string]map[string]*Session{},
+		subscribers:        map[string]map[string]bool{},
+		lock:               &sync.RWMutex{},
+		logger:             log.New(os.Stdout, "pusher: ", 0),
 	}
 }
 
@@ -224,9 +226,10 @@ const (
 )
 
 type Welcome struct {
-	Heartbeat      time.Duration
-	SessionTimeout time.Duration
-	Id             string
+	Heartbeat          time.Duration
+	HeartbeatGracetime time.Duration
+	SessionTimeout     time.Duration
+	Id                 string
 }
 
 type Error struct {
@@ -481,9 +484,10 @@ func (self *Session) Handle(ws MessagePipe) {
 	self.send(Message{
 		Type: TypeWelcome,
 		Welcome: &Welcome{
-			Heartbeat:      self.server.heartbeat / time.Millisecond,
-			SessionTimeout: self.server.sessionTimeout / time.Millisecond,
-			Id:             self.id,
+			Heartbeat:          self.server.heartbeat / time.Millisecond,
+			HeartbeatGracetime: self.server.heartbeatGracetime / time.Millisecond,
+			SessionTimeout:     self.server.sessionTimeout / time.Millisecond,
+			Id:                 self.id,
 		},
 	})
 
@@ -498,7 +502,7 @@ func (self *Session) Handle(ws MessagePipe) {
 				return
 			}
 			self.handleMessage(message)
-		case <-time.After(self.server.heartbeat):
+		case <-time.After(self.server.heartbeat + self.server.heartbeatGracetime):
 			return
 		}
 	}
