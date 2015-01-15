@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/zond/pusher/hub"
+	"github.com/soundtrackyourbrand/pusher/hub"
 	"runtime"
 	"time"
 )

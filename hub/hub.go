@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -65,6 +66,38 @@ func NewServer() *Server {
 		lock:               &sync.RWMutex{},
 		logger:             log.New(os.Stdout, "pusher: ", 0),
 	}
+}
+
+type PusherSessionStats map[string]int
+type PusherStats struct {
+	Sessions      map[string]PusherSessionStats            `json:"sessions"`
+	Subscriptions map[string]map[string]PusherSessionStats `json:"subscriptions"`
+	Subscribers   []string                                 `json:"subscribers"`
+}
+
+func (self *Server) Stats() PusherStats {
+	stats := PusherStats{
+		Sessions:      map[string]PusherSessionStats{},
+		Subscriptions: map[string]map[string]PusherSessionStats{},
+		Subscribers:   []string{},
+	}
+	for k, session := range self.sessions {
+		stats.Sessions[k] = PusherSessionStats{}
+		stats.Sessions[k]["output"] = len(session.output)
+		stats.Sessions[k]["input"] = len(session.input)
+	}
+	for subscription := range self.subscriptions {
+		stats.Subscriptions[subscription] = map[string]PusherSessionStats{}
+		for k, session := range self.subscriptions[subscription] {
+			stats.Subscriptions[subscription][k] = PusherSessionStats{}
+			stats.Subscriptions[subscription][k]["output"] = len(session.output)
+			stats.Subscriptions[subscription][k]["input"] = len(session.input)
+		}
+	}
+	for subscriber := range self.subscribers {
+		stats.Subscribers = append(stats.Subscribers, subscriber)
+	}
+	return stats
 }
 
 func (self *Server) Loglevel(i int) *Server {
@@ -294,7 +327,7 @@ func (self *Session) readLoop(closing chan struct{}, ws MessagePipe) {
 		self.input <- *message
 		self.server.Debugf("%v\t%v\t%v\t%v\t%v\t[received from socket]", time.Now(), message.Type, message.URI, self.RemoteAddr, self.id)
 	}
-	if err != nil {
+	if err != nil && err != io.EOF {
 		self.server.Errorf("%v\t%v\t%v\t[%v]", time.Now(), self.RemoteAddr, self.id, err)
 	}
 }
