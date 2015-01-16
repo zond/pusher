@@ -85,6 +85,7 @@ func (self *Server) Stats() PusherStats {
 		stats.Sessions[k] = PusherSessionStats{}
 		stats.Sessions[k]["output"] = len(session.output)
 		stats.Sessions[k]["input"] = len(session.input)
+		stats.Sessions[k]["connections"] = int(session.connections)
 	}
 	for subscription := range self.subscriptions {
 		stats.Subscriptions[subscription] = map[string]PusherSessionStats{}
@@ -92,6 +93,7 @@ func (self *Server) Stats() PusherStats {
 			stats.Subscriptions[subscription][k] = PusherSessionStats{}
 			stats.Subscriptions[subscription][k]["output"] = len(session.output)
 			stats.Subscriptions[subscription][k]["input"] = len(session.input)
+			stats.Subscriptions[subscription][k]["connections"] = int(session.connections)
 		}
 	}
 	for subscriber := range self.subscribers {
