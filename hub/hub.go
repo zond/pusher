@@ -320,8 +320,8 @@ func (self *wsWrapper) SendMessage(m *Message) (err error) {
 	err = websocket.JSON.Send(self.Conn, m)
 	return
 }
-
 func (self *Session) readLoop(closing chan struct{}, ws MessagePipe) {
+	defer self.kill(closing)
 	var err error
 	var message *Message
 	for message, err = ws.ReceiveMessage(); err == nil; message, err = ws.ReceiveMessage() {
@@ -334,6 +334,7 @@ func (self *Session) readLoop(closing chan struct{}, ws MessagePipe) {
 }
 
 func (self *Session) writeLoop(closing chan struct{}, ws MessagePipe) {
+	defer self.kill(closing)
 	var message Message
 	var err error
 	for {
@@ -473,6 +474,17 @@ func (self *Session) remove() {
 	self.server.removeSession(self.id)
 }
 
+func (self *Session) kill(closing chan struct{}) {
+
+	self.lock.Lock()
+	defer self.lock.Unlock()
+
+	select {
+	case _ = <-closing:
+	default:
+		close(closing)
+	}
+}
 func (self *Session) terminate(closing chan struct{}, ws MessagePipe) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
