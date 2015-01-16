@@ -322,7 +322,6 @@ func (self *wsWrapper) SendMessage(m *Message) (err error) {
 }
 
 func (self *Session) readLoop(closing chan struct{}, ws MessagePipe) {
-	defer self.terminate(closing, ws)
 	var err error
 	var message *Message
 	for message, err = ws.ReceiveMessage(); err == nil; message, err = ws.ReceiveMessage() {
@@ -335,14 +334,13 @@ func (self *Session) readLoop(closing chan struct{}, ws MessagePipe) {
 }
 
 func (self *Session) writeLoop(closing chan struct{}, ws MessagePipe) {
-	defer self.terminate(closing, ws)
 	var message Message
 	var err error
 	for {
 		select {
 		case message = <-self.output:
 			if err = ws.SendMessage(&message); err != nil {
-				self.server.Fatalf("Error sending %s on %+v: %v", message, ws, err)
+				self.server.Fatalf("Error sending %v on %+v: %v", message, ws, err)
 				return
 			}
 			self.server.Debugf("%v\t%v\t%v\t%v\t%v\t[sent to socket]", time.Now(), message.Type, message.URI, self.RemoteAddr, self.id)
