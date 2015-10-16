@@ -1,8 +1,8 @@
 {
-  "name": "pusher",
+  "name": "Pusher",
   "version": "0.1.0",
   "description": "Websocket client lib",
-  "main": "pusher.js",
+  "main": "dist/pusher.js",
   "scripts": {
     "test": "./node_modules/.bin/testem"
   },
@@ -16,11 +16,10 @@
     "url": "https://github.com/soundtrackyourbrand/pusher/issues"
   },
   "devDependencies": {
-    "gulp-wrap-umd": "~0.2.0",
-    "gulp": "~3.6.1",
     "chai": "~1.9.1",
-    "testem": "~0.6.15",
-    "gulp-concat": "~2.2.0"
+    "event-emitter": "^0.3.4",
+    "gulp": "~3.6.1",
+    "testem": "~0.6.15"
   },
   "files": [
     "dist/pusher.js"

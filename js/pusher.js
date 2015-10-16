@@ -1,3 +1,5 @@
+var EventEmitter = require('event-emitter');
+
 var parseUrl = function(url){
   var parser = document.createElement('a');
   parser.href = url;
@@ -441,3 +443,6 @@ Pusher.Client.prototype = {
     this.emitter.removeAllListeners();
   }
 };
+
+module.exports = Pusher;
+

@@ -1,13 +1,4 @@
-
-(function(root, factory) {
-  if (typeof define === 'function' && define.amd) {
-    define(factory);
-  } else if (typeof exports === 'object') {
-    module.exports = factory(require, exports, module);
-  } else {
-    root.Pusher = factory();
-  }
-}(this, function(require, exports, module) {
+var EventEmitter = require('event-emitter');
 
 var parseUrl = function(url){
   var parser = document.createElement('a');
@@ -453,6 +444,5 @@ Pusher.Client.prototype = {
   }
 };
 
-return Pusher;
+module.exports = Pusher;
 
-}));
