@@ -1,5 +1,5 @@
 {
-  "name": "Pusher",
+  "name": "pusher",
   "version": "0.1.0",
   "description": "Websocket client lib",
   "main": "dist/pusher.js",
