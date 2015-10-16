@@ -17,9 +17,9 @@
   },
   "devDependencies": {
     "chai": "~1.9.1",
-    "event-emitter": "^0.3.4",
     "gulp": "~3.6.1",
-    "testem": "~0.6.15"
+    "testem": "~0.6.15",
+    "wolfy87-eventemitter": "^4.3.0"
   },
   "files": [
     "dist/pusher.js"

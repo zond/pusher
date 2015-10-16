@@ -1,4 +1,4 @@
-var EventEmitter = require('event-emitter');
+var EventEmitter = require('wolfy87-eventemitter');
 
 var parseUrl = function(url){
   var parser = document.createElement('a');
