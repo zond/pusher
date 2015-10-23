@@ -13,4 +13,13 @@ My copy
 
 `npm test`
 
-Simple pub/sub in Go
+## Build
+
+`gulp`
+
+## Publish
+
+* Bump the version in `package.json`.
+* Build
+* Push to github.
+* [Create a new release](https://github.com/soundtrackyourbrand/pusher/releases/new)
