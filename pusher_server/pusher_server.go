@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"runtime"
 
-	"github.com/soundtrackyourbrand/pusher/hub"
+	"github.com/zond/pusher/hub"
 )
 
 func main() {

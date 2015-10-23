@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/soundtrackyourbrand/pusher/hub"
+	"github.com/zond/pusher/hub"
 )
 
 type Client struct {

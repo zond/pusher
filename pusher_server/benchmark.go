@@ -3,10 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/zond/pusher/hub"
 	"runtime"
 	"time"
-
-	"github.com/soundtrackyourbrand/pusher/hub"
 )
 
 func testMsg(channel string) hub.Message {

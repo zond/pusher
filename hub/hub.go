@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -66,40 +65,6 @@ func NewServer() *Server {
 		lock:               &sync.RWMutex{},
 		logger:             log.New(os.Stdout, "pusher: ", 0),
 	}
-}
-
-type PusherSessionStats map[string]int
-type PusherStats struct {
-	Sessions      map[string]PusherSessionStats            `json:"sessions"`
-	Subscriptions map[string]map[string]PusherSessionStats `json:"subscriptions"`
-	Subscribers   []string                                 `json:"subscribers"`
-}
-
-func (self *Server) Stats() PusherStats {
-	stats := PusherStats{
-		Sessions:      map[string]PusherSessionStats{},
-		Subscriptions: map[string]map[string]PusherSessionStats{},
-		Subscribers:   []string{},
-	}
-	for k, session := range self.sessions {
-		stats.Sessions[k] = PusherSessionStats{}
-		stats.Sessions[k]["output"] = len(session.output)
-		stats.Sessions[k]["input"] = len(session.input)
-		stats.Sessions[k]["connections"] = int(session.connections)
-	}
-	for subscription := range self.subscriptions {
-		stats.Subscriptions[subscription] = map[string]PusherSessionStats{}
-		for k, session := range self.subscriptions[subscription] {
-			stats.Subscriptions[subscription][k] = PusherSessionStats{}
-			stats.Subscriptions[subscription][k]["output"] = len(session.output)
-			stats.Subscriptions[subscription][k]["input"] = len(session.input)
-			stats.Subscriptions[subscription][k]["connections"] = int(session.connections)
-		}
-	}
-	for subscriber := range self.subscribers {
-		stats.Subscribers = append(stats.Subscribers, subscriber)
-	}
-	return stats
 }
 
 func (self *Server) Loglevel(i int) *Server {
@@ -320,28 +285,29 @@ func (self *wsWrapper) SendMessage(m *Message) (err error) {
 	err = websocket.JSON.Send(self.Conn, m)
 	return
 }
+
 func (self *Session) readLoop(closing chan struct{}, ws MessagePipe) {
-	defer self.kill(closing)
+	defer self.terminate(closing, ws)
 	var err error
 	var message *Message
 	for message, err = ws.ReceiveMessage(); err == nil; message, err = ws.ReceiveMessage() {
 		self.input <- *message
 		self.server.Debugf("%v\t%v\t%v\t%v\t%v\t[received from socket]", time.Now(), message.Type, message.URI, self.RemoteAddr, self.id)
 	}
-	if err != nil && err != io.EOF {
+	if err != nil {
 		self.server.Errorf("%v\t%v\t%v\t[%v]", time.Now(), self.RemoteAddr, self.id, err)
 	}
 }
 
 func (self *Session) writeLoop(closing chan struct{}, ws MessagePipe) {
-	defer self.kill(closing)
+	defer self.terminate(closing, ws)
 	var message Message
 	var err error
 	for {
 		select {
 		case message = <-self.output:
 			if err = ws.SendMessage(&message); err != nil {
-				self.server.Fatalf("Error sending %v on %+v: %v", message, ws, err)
+				self.server.Fatalf("Error sending %s on %+v: %v", message, ws, err)
 				return
 			}
 			self.server.Debugf("%v\t%v\t%v\t%v\t%v\t[sent to socket]", time.Now(), message.Type, message.URI, self.RemoteAddr, self.id)
@@ -474,17 +440,6 @@ func (self *Session) remove() {
 	self.server.removeSession(self.id)
 }
 
-func (self *Session) kill(closing chan struct{}) {
-
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
-	select {
-	case _ = <-closing:
-	default:
-		close(closing)
-	}
-}
 func (self *Session) terminate(closing chan struct{}, ws MessagePipe) {
 	self.lock.Lock()
 	defer self.lock.Unlock()
