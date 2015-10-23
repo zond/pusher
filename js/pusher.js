@@ -1,3 +1,5 @@
+var EventEmitter = require('wolfy87-eventemitter');
+
 var parseUrl = function(url){
   var parser = document.createElement('a');
   parser.href = url;
@@ -13,6 +15,31 @@ var parseUrl = function(url){
   };
 };
 
+if (!Function.prototype.bind) {
+  Function.prototype.bind = function(oThis) {
+    if (typeof this !== 'function') {
+      // closest thing possible to the ECMAScript 5
+      // internal IsCallable function
+      throw new TypeError('Function.prototype.bind - what is trying to be bound is not callable');
+    }
+
+    var aArgs   = Array.prototype.slice.call(arguments, 1),
+        fToBind = this,
+        fNOP    = function() {},
+        fBound  = function() {
+          return fToBind.apply(this instanceof fNOP && oThis
+                 ? this
+                 : oThis,
+                 aArgs.concat(Array.prototype.slice.call(arguments)));
+        };
+
+    fNOP.prototype = this.prototype;
+    fBound.prototype = new fNOP();
+
+    return fBound;
+  };
+}
+
 var Pusher = Pusher || {};
 
 Pusher.Transport = {};
@@ -24,14 +51,20 @@ Pusher.Transport.Socket = function(options){
   this.seqNo = 0;
   this.minBackoff = options.minBackoff || 500;
   this.maxBackoff = options.maxBackoff || 10000;
-  this.backoff = null;
+  this.backoff = this.minBackoff;
   this.lastMessageReceivedAt = null;
 
   this.callbacks = {};
   this.buffer = [];
-  this.subscriptions = {};
   this.emitter = new EventEmitter();
   this.socket = options.socket || null; // This is used for DI during testing.
+
+  this.emitReconnected = this.emitReconnected.bind(this);
+  this.onOnline = this.onOnline.bind(this);
+  this.onOffline = this.onOffline.bind(this);
+  this.startConnectivityListeners = this.startConnectivityListeners.bind(this);
+  this.stopConnectivityListeners = this.stopConnectivityListeners.bind(this);
+  this.startConnectivityListeners();
 };
 Pusher.Transport.Socket.prototype = {
   open: function(host){
@@ -45,23 +78,36 @@ Pusher.Transport.Socket.prototype = {
   },
 
   reconnect: function(){
-    if(this.socket) {
+    if(this.loglevel === 'info') console.info('Trying to reconnect', this.socket);
+    if(this.socket && this.socket.readyState !== WebSocket.CLOSING) {
       this.socket.close();
+    } else if(this.socket && this.socket.readyState === WebSocket.CLOSING) {
+      this.socket.onclose = function() {
+        if(this.loglevel === 'info') console.info('Ignoring onclose on old socket');
+        this.socket = null;
+      }
     }
+    this.on('connect', this.emitReconnected);
     this.open();
 
     this.backoff *= 2;
     this.backoff = this.backoff > this.maxBackoff ? this.maxBackoff : this.backoff;
   },
 
+  emitReconnected: function() {
+    this.emitter.emit('reconnected');
+    return true;
+  },
+
   openSocket: function(){
+    if(this.loglevel === 'info') console.info('Opening a new socket');
     var socket = new WebSocket(this._buildURL());
 
     socket.onopen = function() {
       this.isClosed = false;
       this.lastHeartbeatReceivedAt = new Date();
-      this.backoff = this.minBackoff;
       this.emitter.emit('connect');
+      this.backoff = this.minBackoff;
     }.bind(this);
 
     socket.onerror = function(message){
@@ -85,16 +131,46 @@ Pusher.Transport.Socket.prototype = {
   },
 
   close: function(){
-    console.trace();
-
+    this.buffer = [];
+    this.callbacks = {};
     this.isClosed = true;
     this.stopHeartbeat();
     this.stopReconnections();
-    this.socket.close();
+    if(this.socket) {
+      this.socket.close();
+    }
+  },
+
+  startConnectivityListeners: function() {
+    this.stopConnectivityListeners();
+    if (typeof window.addEventListener === "function") {
+      if(this.loglevel === 'info') console.info('Adding connectivity listeners');
+      window.addEventListener('online', this.onOnline, false);
+      window.addEventListener('offline', this.onOffline, false);
+    }
+  },
+
+  stopConnectivityListeners: function() {
+    if (typeof window.removeEventListener === "function") {
+      if(this.loglevel === 'info') console.info('Removing connectivity listeners');
+      window.removeEventListener('online', this.onOnline, false);
+      window.removeEventListener('offline', this.onOffline, false);
+    }
+  },
+
+  onOnline: function() {
+    if(this.loglevel === 'info') console.info('Gained connection..');
+    this.startReconnections();
+  },
+
+  onOffline: function() {
+    if(this.loglevel === 'info') console.info('Lost connection.. Stopping heartbeats and reconnections.');
+    this.stopHeartbeat();
+    this.stopReconnections();
   },
 
   write: function(msg){
-    if(this.socket && this.socket.readyState === 1){
+    if(this.socket && this.socket.readyState === WebSocket.OPEN){
       msg.Id = this.id + ':' + this.seqNo++;
 
       if(msg.callback){
@@ -166,15 +242,19 @@ Pusher.Transport.Socket.prototype = {
     }
   },
 
-
   destroy: function(){
     this.close();
     this.emitter.removeAllListeners();
     this.socket = null;
+    this.stopConnectivityListeners();
   },
 
   on: function(event, cb){
     this.emitter.on.apply(this.emitter, arguments);
+  },
+
+  once: function(event, cb){
+    this.emitter.once.apply(this.emitter, arguments);
   },
 
   off: function(event, cb){
@@ -190,6 +270,7 @@ Pusher.Transport.Socket.prototype = {
   },
 
   startHeartbeat: function(){
+    this.stopHeartbeat();
     this.heartbeater = setInterval(function(){
       if(this.loglevel === 'info') console.info('Sending heartbeat: ', new Date().toString());
       this.write({
@@ -199,20 +280,23 @@ Pusher.Transport.Socket.prototype = {
   },
 
   stopHeartbeat: function(){
-    clearInterval(this.heartbeater);
+    if(this.heartbeater) {
+      clearInterval(this.heartbeater);
+    }
   },
-
 
   startReconnections: function(){
     this.reconnector = setTimeout(this.reconnect.bind(this), this.backoff);
   },
 
   stopReconnections: function(){
-    this.clearInterval(this.reconnector);
+    if(this.reconnector) {
+      clearInterval(this.reconnector);
+    }
   },
 
   _buildURL: function(){
-    var protocol = parseUrl(window.location.toString()).protocol === 'https:' ? 'wss:' : 'ws:';
+    var protocol = ['https:', 'wss:'].indexOf(this.host.protocol) > -1 ? 'wss:' : 'ws:';
     var url = protocol + '//' + this.host.host;
 
     if(this.host.pathname) url += this.host.pathname;
@@ -247,13 +331,15 @@ Pusher.Client = function(options){
   this.message = this.message.bind(this);
   this.error = this.error.bind(this);
   this.authorize = this.authorize.bind(this);
+  this.resubscribe = this.resubscribe.bind(this);
 
   this.socket.on('message', this.message);
   this.socket.on('error', this.error);
   this.socket.on('authorization error', this.authorize);
+  this.socket.on('reconnected', this.resubscribe);
 
   this.socket.on('connect', function(){
-    this.retries = 0;
+    this.retries = {};
     this.emitter.emit('connect');
   }.bind(this));
 
@@ -265,16 +351,40 @@ Pusher.Client.prototype = {
     this.socket.open(uri);
   },
 
+  resubscribe: function() {
+    var channels = this.emitter._getEvents();
+    var socket = this;
+
+    for (var i = 0; i < channels.length; i ++) {
+      var channel = channels[i];
+      if(channel === 'connect' || channel === 'message') {
+        continue;
+      }
+      if(this.loglevel === 'info') console.info('Resubscribing to ', channel);
+      socket.subscribe(channel);
+    }
+
+  },
+
   subscribe: function(channel, cb){
-    this.emitter.on(channel, cb);
+    if(this.loglevel === 'info') console.info('Sending subscribe message for ', channel);
+    if(cb) {
+      this.emitter.on(channel, cb);
+    }
     this.socket.write({
       Type: 'Subscribe',
       URI: channel
     });
   },
 
-  unsubscribe: function(channel){
+  unsubscribe: function(channel, cb){
     this.emitter.off(channel, cb);
+    var remainingListeners = this.emitter.getListeners(channel);
+    if(remainingListeners && remainingListeners.length > 0) {
+      if(this.loglevel === 'info') console.info('There are still listeners on ', channel, ' - ergo: dont unsubscribe');
+      return;
+    }
+    if(this.loglevel === 'info') console.info('Sending unsubscribe message for ', channel);
     this.socket.write({
       Type: 'Unsubscribe',
       URI: channel
@@ -294,11 +404,12 @@ Pusher.Client.prototype = {
   },
 
   message: function(packet){
+    this.emitter.emit('message', packet);
     this.emitter.emit(packet.URI, packet.Data);
   },
 
   authorize: function(packet){
-    if(this.retries >= this.maxRetries) return;
+    if(this.retries[packet.Id] && this.retries[packet.Id] >= this.maxRetries) return;
 
     var isWrite = packet.Data.Type === 'Message';
     this.authorizer(packet.Data.URI, isWrite, function(token){
@@ -308,12 +419,12 @@ Pusher.Client.prototype = {
         URI: packet.Data.URI,
         Write: isWrite,
         callback: function(){
-          this.retries = 0;
+          delete this.retries[packet.Id];
           this.socket.write(packet.Data); // Resends the failed packet that we need authorization for.
         }.bind(this)
       });
     }.bind(this));
-    this.retries++;
+    this.retries[packet.Id] = this.retries[packet.Id] ? this.retries[packet.Id] + 1 : 1;
   },
 
   error: function(packet){
@@ -333,3 +444,6 @@ Pusher.Client.prototype = {
     this.emitter.removeAllListeners();
   }
 };
+
+module.exports = Pusher;
+
